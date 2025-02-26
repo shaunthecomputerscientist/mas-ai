@@ -368,6 +368,9 @@ Unlike centralized systems with fixed control hierarchies, MAS AI implements tru
 
 This architecture eliminates bottlenecks, enables parallel processing, and creates resilient agent networks that dynamically adapt to changing requirements.
 
+
+
+
 ## Orchestrated Multi-Agent Network (OMAN)
 
 OMAN coordinates multiple MAS instances into a cohesive network, managed by an LLM-based supervisor/router:
@@ -384,6 +387,20 @@ oman = OrchestratedMultiAgentNetwork(
 
 # Delegate complex task across the network
 result = oman.delegate_task("Research AI trends and schedule a meeting")
+```
+
+
+
+## Creating yor own tools
+
+```python
+from langchain.tools import tool
+
+@tool
+def my_tool(query: str) -> str:
+    """This is a tool. Provide Detailed Docmentation for ai. """
+    
+    return "This is a tool"
 ```
 
 ## Installation
