@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mas-ai"
+version = "0.1.1"  # Update this to a new version
+authors = [{ name = "PILER", email = "mrpolymathematica@gmail.com" }]
+description = "Multi-Agent System Framework for AI Agents built on LangGraph"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "langgraph>=0.2.67",
+    "langchain==0.3.15",
+    "langchain-community==0.3.15",
+    "langchain-core==0.3.31",
+    "pydantic>=2.0",
+    "python-dotenv",
+    "tqdm",
+    "requests",
+    "anthropic",
+    "openai",
+    "google-generativeai==0.8.4",
+    "langchain-groq==0.2.3",
+    "langchain-openai==0.3.2",
+    "langchain-text-splitters==0.3.5",
+    "langsmith",
+    "beautifulsoup4",
+    "arxiv",
+    "wikipedia",
+    "duckduckgo-search",
+    "psycopg2",
+    "tokenizers"
+]
+
+[project.optional-dependencies]
+tools = []  # Temporarily empty until tools are reintroduced
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+# Define package discovery using an inline table
+packages.find = { where = ["src"], include = ["mas_ai*", "mas_ai.*"], exclude = ["mas_ai.Tools.baseTools*", "mas_ai.Tools.searchTools*", "mas_ai.Tools.InputOutputTools*", "mas_ai.Tools.calendarTools*", "mas_ai.Tools.emailTools*", "mas_ai.Tools.visiontools*", "mas_ai.Tools.utilities.platformData_utils*","mas_ai.Tools.Vectorstore*"] }
+
+[tool.setuptools.package-data]
+mas_ai = [
+    "prompts/*.json",
+    "GenerativeModel/**/*.py",
+    "baseGenerativeModel/**/*.py"
+]

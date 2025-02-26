@@ -1,0 +1,66 @@
+Metadata-Version: 2.2
+Name: mas-ai
+Version: 0.1.1
+Summary: Multi-Agent System Framework for AI Agents built on LangGraph
+Author-email: PILER <mrpolymathematica@gmail.com>
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: langgraph>=0.2.67
+Requires-Dist: langchain==0.3.15
+Requires-Dist: langchain-community==0.3.15
+Requires-Dist: langchain-core==0.3.31
+Requires-Dist: pydantic>=2.0
+Requires-Dist: python-dotenv
+Requires-Dist: tqdm
+Requires-Dist: requests
+Requires-Dist: anthropic
+Requires-Dist: openai
+Requires-Dist: google-generativeai==0.8.4
+Requires-Dist: langchain-groq==0.2.3
+Requires-Dist: langchain-openai==0.3.2
+Requires-Dist: langchain-text-splitters==0.3.5
+Requires-Dist: langsmith
+Requires-Dist: beautifulsoup4
+Requires-Dist: arxiv
+Requires-Dist: wikipedia
+Requires-Dist: duckduckgo-search
+Requires-Dist: psycopg2
+Requires-Dist: tokenizers
+Provides-Extra: tools
+
+Develop 2 architecture for agent:
+1. Router,Reflector,Evaluator ✅
+2. Planner, Executor, Reflector (not yet)
+    - plan the tasks
+    - execute the tasks from lists, map them to task ids.
+    - Reflector will reflect on the results of the tasks and the plan.
+    - rePlan else exit
+
+MMAS
+[Supervisor]
+
+[Mas1 decentralized] [Mas2 decentralized] [Mas3 decentralized] ... [MasN decentralized]
+
+
+
+
+
+
+
+Documentation:
+
+Key types of memory:
+
+1. Agent Memory:
+    - Short term memory: From chat history, context, input
+    - Component Short Term Memory: Each component within an agent has its own short term memory.
+    -Component Shared Memory: Each component has it's shared memory to communicate with other components within the system.
+    -Component Long Short Term Memory: Each component has it's own long short term memory to keep track of the past interactions. These are collective summaries of n past interactions. Where n is the long context order.
+
+2. Multi Agent System Memory:
+    - Shared Memory: A Shared Memory Across all agents. Decided by memory-order key in sequential mas and decentralized mas. Default to 3.
+    This shared memory is typically short term, unless it's used to create summary and store in Long Short Term Memory.
+
+Short Term Memory in all agents is enabled by default. It must not be turned off. Only memory_order can be manipulated.
+

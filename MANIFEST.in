@@ -1,0 +1,10 @@
+exclude src/mas_ai/Tools/calendar.py
+exclude src/mas_ai/Tools/email.py
+exclude src/mas_ai/Tools/vision.py
+exclude src/mas_ai/Tools/math.py
+exclude src/mas_ai/Tools/search.py
+exclude src/mas_ai/Tools/baseTools.py
+exclude src/mas_ai/Tools/InputOutputTools.py
+exclude src/mas_ai/Tools/ragTools.py
+exclude src/mas_ai/Tools/utilities/platformData_utils
+exclude src/mas_ai/Tools/Vectorstore/
