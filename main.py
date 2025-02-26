@@ -1,3 +1,7 @@
+
+
+#SAMPLE SCRIPT SHOWING EXAMPLE OF USING MAS-AI
+
 #---------------------------------AgentManager---------------------------------
 import os
 from mas_ai.AgentManager.AgentManager import AgentManager, AgentDetails
