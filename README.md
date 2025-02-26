@@ -423,7 +423,7 @@ pip install -r requirements.txt
 2. Option 2: Install using pip
 
 ```bash
-pip install mas-ai
+pip install multi_agent_system_ai
 ```
 
 ## Contributing

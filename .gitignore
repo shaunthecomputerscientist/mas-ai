@@ -1,6 +1,6 @@
 MAS/PRIVATE
 MAS/WORKSPACE
-MAS/Database/images
+MAS/Database
 recoverycode.txt
 crewaivsmasai.txt
 .env
@@ -16,4 +16,4 @@ src/mas_ai/Tools/baseTools.py
 src/mas_ai/Tools/InputOutputTools.py
 src/mas_ai/Tools/mathTools.py
 src/mas_ai/Tools/ragTools.py
-dist
+src/mas_ai/Services/

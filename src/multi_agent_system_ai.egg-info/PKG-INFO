@@ -1,5 +1,5 @@
 Metadata-Version: 2.2
-Name: mas-ai
+Name: multi_agent_system_ai
 Version: 0.1.1
 Summary: Multi-Agent System Framework for AI Agents built on LangGraph
 Author-email: PILER <mrpolymathematica@gmail.com>
