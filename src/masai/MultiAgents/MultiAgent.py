@@ -27,6 +27,7 @@ class SupervisorConfig:
     memory_order: int
     memory: bool
     extra_context: dict
+    supervisor_system_prompt: Optional[str]
     
 
 
@@ -88,8 +89,11 @@ class MultiAgentSystem:
         """Load supervisor prompt from module."""
         return get_supervisor_prompt()
     
-    def _load_supervisor_promptTemplate(self):
-        system_prompt = self._load_supervisorPrompt()
+    def _load_supervisor_promptTemplate(self, supervisor_system_prompt: str=None):
+        if supervisor_system_prompt:
+            system_prompt = supervisor_system_prompt
+        else:
+            system_prompt = self._load_supervisorPrompt()
         input_variables = ['question', 'history', 'schema','current_time','useful_info','coworking_agents_info']
         template = """
         INFO:{useful_info} 

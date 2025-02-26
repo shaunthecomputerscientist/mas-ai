@@ -1,6 +1,6 @@
 Metadata-Version: 2.2
 Name: masai_framework
-Version: 0.1.0
+Version: 0.1.1
 Summary: Multi-Agent System Framework for AI Agents built on LangGraph
 Author-email: PILER <mrpolymathematica@gmail.com>
 Requires-Python: >=3.9
@@ -454,7 +454,7 @@ pip install -r requirements.txt
 2. Option 2: Install using pip
 
 ```bash
-pip install multi_agent_system_ai
+pip install masai_framework
 ```
 
 ## Contributing
