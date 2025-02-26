@@ -3,8 +3,8 @@ requires = ["setuptools>=68.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "multi_agent_system_ai"
-version = "0.1.1"  # Update this to a new version
+name = "masai_framework"
+version = "0.1.0"  # Update this to a new version
 authors = [{ name = "PILER", email = "mrpolymathematica@gmail.com" }]
 description = "Multi-Agent System Framework for AI Agents built on LangGraph"
 readme = "README.md"
@@ -39,10 +39,10 @@ tools = []  # Temporarily empty until tools are reintroduced
 [tool.setuptools]
 package-dir = { "" = "src" }
 # Define package discovery using an inline table
-packages.find = { where = ["src"], include = ["mas_ai*", "mas_ai.*"], exclude = ["mas_ai.Tools.baseTools*", "mas_ai.Tools.searchTools*", "mas_ai.Tools.InputOutputTools*", "mas_ai.Tools.calendarTools*", "mas_ai.Tools.emailTools*", "mas_ai.Tools.visiontools*", "mas_ai.Tools.utilities.platformData_utils*","mas_ai.Tools.Vectorstore*"] }
+packages.find = { where = ["src"], include = ["masai*", "masai.*"], exclude = ["masai.Tools.baseTools*", "masai.Tools.searchTools*", "masai.Tools.InputOutputTools*", "masai.Tools.calendarTools*", "masai.Tools.emailTools*", "masai.Tools.visiontools*", "masai.Tools.utilities.platformData_utils*","masai.Tools.Vectorstore*"] }
 
 [tool.setuptools.package-data]
-mas_ai = [
+masai = [
     "prompts/*.json",
     "GenerativeModel/**/*.py",
     "baseGenerativeModel/**/*.py"

@@ -150,7 +150,7 @@ The `AgentManager` class is the central hub for creating and managing individual
 Creating effective agents requires defining their capabilities, tools, and behavioral characteristics. Below is an example of configuring three specialized agents:
 
 ```python
-from mas_ai.AgentManager.AgentManager import AgentManager, AgentDetails
+from masai.AgentManager.AgentManager import AgentManager, AgentDetails
 from your_module.Tools.searchTools import search_tool, youtube_transcript
 from your_module.Tools.baseTools import human_in_loop_input
 from your_module.Tools.calendarTools import fetch_calendar_events, manage_calendar_event
@@ -376,7 +376,7 @@ This architecture eliminates bottlenecks, enables parallel processing, and creat
 OMAN coordinates multiple MAS instances into a cohesive network, managed by an LLM-based supervisor/router:
 
 ```python
-from mas_ai.OrchestratedMultiAgentNetwork import OrchestratedMultiAgentNetwork
+from masai.OrchestratedMultiAgentNetwork import OrchestratedMultiAgentNetwork
 
 # Create OMAN with multiple MAS instances
 oman = OrchestratedMultiAgentNetwork(
@@ -423,7 +423,7 @@ pip install -r requirements.txt
 2. Option 2: Install using pip
 
 ```bash
-pip install multi_agent_system_ai
+pip install masai_framework
 ```
 
 ## Contributing

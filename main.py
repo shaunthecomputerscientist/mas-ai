@@ -3,16 +3,16 @@
 #SAMPLE SCRIPT SHOWING EXAMPLE OF USING MAS-AI
 #---------------------------------AgentManager---------------------------------
 import os
-from mas_ai.AgentManager.AgentManager import AgentManager, AgentDetails
-from mas_ai.MultiAgents.MultiAgent import MultiAgentSystem, SupervisorConfig
+from src.masai.AgentManager.AgentManager import AgentManager, AgentDetails
+from src.masai.MultiAgents.MultiAgent import MultiAgentSystem, SupervisorConfig
 #---------------------------------Tools---------------------------------
-from src.mas_ai.Tools.baseTools import human_in_loop_input
-from src.mas_ai.Tools.searchTools import search_tool, youtube_transcript
-from src.mas_ai.Tools.InputOutputTools import file_handler_IO, files_checker, save_long_term_details
-from src.mas_ai.Tools.calendarTools import fetch_calendar_events, manage_calendar_event
-from src.mas_ai.Tools.emailTools import email_handler
-from src.mas_ai.Tools.visiontools import Vision_Model
-from src.mas_ai.Tools.utilities.tokenGenerationTool import token_stream,MarkupProcessor
+from src.masai.Tools.baseTools import human_in_loop_input
+from src.masai.Tools.searchTools import search_tool, youtube_transcript
+from src.masai.Tools.InputOutputTools import file_handler_IO, files_checker, save_long_term_details
+from src.masai.Tools.calendarTools import fetch_calendar_events, manage_calendar_event
+from src.masai.Tools.emailTools import email_handler
+from src.masai.Tools.visiontools import Vision_Model
+from src.masai.Tools.utilities.tokenGenerationTool import token_stream,MarkupProcessor
 
 from dotenv import load_dotenv
 load_dotenv()
