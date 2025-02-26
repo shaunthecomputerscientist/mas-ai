@@ -5,6 +5,7 @@ recoverycode.txt
 crewaivsmasai.txt
 .env
 ~
+test.py
 .qodo
 src/masai/Tools/searchTools.py
 src/masai/Tools/visionTools.py
@@ -17,4 +18,3 @@ src/masai/Tools/InputOutputTools.py
 src/masai/Tools/mathTools.py
 src/masai/Tools/ragTools.py
 src/masai/Services/
-test.py
