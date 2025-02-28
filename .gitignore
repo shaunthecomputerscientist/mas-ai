@@ -7,14 +7,5 @@ crewaivsmasai.txt
 ~
 planning.py
 .qodo
-src/masai/Tools/searchTools.py
-src/masai/Tools/visionTools.py
-src/masai/Tools/emailTools.py
-src/masai/Tools/calendarTools.py
-src/masai/Tools/utilities/platformData_utils
-src/masai/Tools/Vectorstore/
-src/masai/Tools/baseTools.py
-src/masai/Tools/InputOutputTools.py
-src/masai/Tools/mathTools.py
-src/masai/Tools/ragTools.py
+src/masai/Tools/tools
 src/masai/Services/

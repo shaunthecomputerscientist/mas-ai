@@ -1,6 +1,6 @@
 Metadata-Version: 2.2
 Name: masai_framework
-Version: 0.1.1
+Version: 0.1.2
 Summary: Multi-Agent System Framework for AI Agents built on LangGraph
 Author-email: PILER <mrpolymathematica@gmail.com>
 Requires-Python: >=3.9
@@ -11,22 +11,37 @@ Requires-Dist: langchain==0.3.15
 Requires-Dist: langchain-community==0.3.15
 Requires-Dist: langchain-core==0.3.31
 Requires-Dist: pydantic>=2.0
+Requires-Dist: langchain-neo4j==0.3.0
 Requires-Dist: python-dotenv
+Requires-Dist: huggingface-hub==0.27.0
 Requires-Dist: tqdm
 Requires-Dist: requests
 Requires-Dist: anthropic
 Requires-Dist: openai
+Requires-Dist: ollama==0.4.4
+Requires-Dist: anthropic==0.45.0
 Requires-Dist: google-generativeai==0.8.4
 Requires-Dist: langchain-groq==0.2.3
+Requires-Dist: langchain-milvus==0.1.8
+Requires-Dist: pymilvus==2.5.4
+Requires-Dist: PyPDF2==3.0.1
 Requires-Dist: langchain-openai==0.3.2
 Requires-Dist: langchain-text-splitters==0.3.5
 Requires-Dist: langsmith
 Requires-Dist: beautifulsoup4
+Requires-Dist: langchain-google-community==2.0.4
 Requires-Dist: arxiv
 Requires-Dist: wikipedia
 Requires-Dist: duckduckgo-search
 Requires-Dist: psycopg2
-Requires-Dist: tokenizers
+Requires-Dist: tokenizers==0.21.0
+Requires-Dist: neo4j
+Requires-Dist: langchain_neo4j==0.3.0
+Requires-Dist: json-repair==0.39.1
+Requires-Dist: langchain-google-genai==2.0.9
+Requires-Dist: pytz
+Requires-Dist: PyAutoGUI==0.9.54
+Requires-Dist: PyGetWindow==0.0.9
 Provides-Extra: tools
 
 # MAS AI: Multi-Agent System Framework
@@ -429,9 +444,9 @@ from langchain.tools import tool
 
 @tool
 def my_tool(query: str) -> str:
-    """This is a tool. Provide Detailed Docmentation for ai. """
+    """This is a tool. Provide Detailed Docmentation for ai in docstring. (PARAMETERS, RETURN, PURPOSE)"""
     
-    return "This is a tool"
+    return "This is a tool output, fed to the ai."
 ```
 
 ## Installation

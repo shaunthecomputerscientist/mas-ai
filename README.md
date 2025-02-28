@@ -398,9 +398,9 @@ from langchain.tools import tool
 
 @tool
 def my_tool(query: str) -> str:
-    """This is a tool. Provide Detailed Docmentation for ai. """
+    """This is a tool. Provide Detailed Docmentation for ai in docstring. (PARAMETERS, RETURN, PURPOSE)"""
     
-    return "This is a tool"
+    return "This is a tool output, fed to the ai."
 ```
 
 ## Installation

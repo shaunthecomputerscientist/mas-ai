@@ -15,11 +15,6 @@ src/masai/MultiAgents/__init__.py
 src/masai/OMAN/__init__.py
 src/masai/OMAN/oman.py
 src/masai/Tools/__init__.py
-src/masai/Tools/calendarTools.py
-src/masai/Tools/emailTools.py
-src/masai/Tools/mathTools.py
-src/masai/Tools/searchTools.py
-src/masai/Tools/visiontools.py
 src/masai/Tools/PARSERs/json_parser.py
 src/masai/Tools/logging_setup/logger.py
 src/masai/Tools/utilities/tokenGenerationTool.py
