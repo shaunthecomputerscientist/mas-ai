@@ -149,6 +149,7 @@ class MASGenerativeModel(BaseGenerativeModel):
         agent_context: Optional[dict] = None,
         agent_name: Optional[str] = None,
         component_context: list = [],
+        **kwargs
     ):
         """
         MAS-specific response generation with agent context support.
@@ -167,9 +168,9 @@ class MASGenerativeModel(BaseGenerativeModel):
         
         if component_context:
             self.chat_history.extend(component_context)
-            self.chat_history.append({'role': 'agent|user|tool', 'content': prompt})
+            self.chat_history.append({'role': kwargs['passed_from'] if kwargs['passed_from'] else agent_name, 'content': prompt})
         else:
-            self.chat_history.append({'role': 'agent|user|tool', 'content': prompt})
+            self.chat_history.append({'role': kwargs['passed_from'] if kwargs['passed_from'] else agent_name, 'content': prompt})
 
         # Prepare MAS-specific inputs
         mas_inputs = {
@@ -183,6 +184,7 @@ class MASGenerativeModel(BaseGenerativeModel):
         }
 
         try:
+            # print("\n\n\n\n",self.prompt.format(**mas_inputs),"\n\n")
             # Use the prompt template with MAS-specific inputs
             response = self.model.with_structured_output(output_structure).invoke(
                 self.prompt.format(**mas_inputs)
@@ -190,7 +192,7 @@ class MASGenerativeModel(BaseGenerativeModel):
             
             # Update chat history with structured response
             if isinstance(response, dict) and 'answer' in response:
-                self.chat_history.append({'role': 'assistant', 'content': response['answer']})
+                self.chat_history.append({'role': f'{agent_name}', 'content': response['answer']})
             
             return response
             

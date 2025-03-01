@@ -143,11 +143,13 @@ class MultiAgentSystem:
                         f"<ORIGINAL QUESTION>: {query}\n\n"
                         f"<YOUR TASK>: Process the previous agent's output and continue the task."
                     )
+                    passed_from=self.state['last_agent']
                 else:
                     agent_prompt = current_query
+                    passed_from="user"
                 
                 # Execute current agent
-                agent_output = current_agent.initiate_agent(query=agent_prompt)
+                agent_output = current_agent.initiate_agent(query=agent_prompt,passed_from=passed_from)
                 
                 # Update state with current agent's output
                 self._update_state(
@@ -191,7 +193,7 @@ class MultiAgentSystem:
             dict: Agent output
         """
         if self.state['last_agent'] in self.agentManager.agents.keys():
-            agent_output = self.agentManager.agents[self.state['last_agent']].initiate_agent(query=query)
+            agent_output = self.agentManager.agents[self.state['last_agent']].initiate_agent(query=query, passed_from="user")
             self._update_state(
                     message='|'.join(str(output.get('content', output.get('tool_output', ''))) 
                                     for output in agent_output['messages'][-memory_order:]),
@@ -200,7 +202,7 @@ class MultiAgentSystem:
                     reasoning=agent_output['reasoning']
                 )
         else:
-            agent_output = set_entry_agent.initiate_agent(query=query)
+            agent_output = set_entry_agent.initiate_agent(query=query,passed_from="user")
             self._update_state(
                         message='|'.join(str(output.get('content', output.get('tool_output', ''))) 
                                         for output in agent_output['messages'][-memory_order:]),
@@ -210,7 +212,7 @@ class MultiAgentSystem:
                     )
         while agent_output['delegate_to_agent']:
             try:
-                next_agent = self.agentManager.agents[agent_output['delegate_to_agent'].lower()]
+                next_agent: Agent = self.agentManager.agents[agent_output['delegate_to_agent'].lower()]
             except Exception as e:
                 raise ValueError(e)
             agent_prompt = (
@@ -219,7 +221,7 @@ class MultiAgentSystem:
                         f"<LAST AGENT ANSWERS>: {self.state['last_agent_answers']}\n\n" #shared memory accross multiple agents
                         f"<ORIGINAL QUESTION>: {query}"
                     )
-            agent_output=next_agent.initiate_agent(query=agent_prompt)
+            agent_output=next_agent.initiate_agent(query=agent_prompt, passed_from=self.state['last_agent'])
 
             self._update_state(
                     message='|'.join(str(output.get('content', output.get('tool_output', ''))) 

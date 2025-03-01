@@ -1,11 +1,11 @@
 MAS/PRIVATE
 MAS/WORKSPACE
 MAS/Database
-recoverycode.txt
-crewaivsmasai.txt
 .env
 ~
-planning.py
 .qodo
 src/masai/Tools/tools
 src/masai/Services/
+project_example
+miscelleneous
+masai

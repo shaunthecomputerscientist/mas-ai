@@ -102,7 +102,7 @@ class AgentManager:
 
     def create_agent(self, agent_name: str, tools: List[object], agent_details: AgentDetails, 
                  memory_order: int = 20, long_context: bool = True,long_context_order: int = 10, shared_memory_order: int = 10, 
-                 plan: bool = False):
+                 plan: bool = False,**kwargs):
         """Create and register a new agent in the AgentManager.
 
         Args:
@@ -114,6 +114,23 @@ class AgentManager:
             long_context_order (int, optional): Number of past interactions summary to keep in long context. Defaults to 10.
             shared_memory_order (int, optional): Shared memory size for components. Defaults to 10.
             plan (bool, optional): Include planner if True. Defaults to False.
+            
+            **kwargs: Additional keyword arguments.  Can include:
+                - `order_dict` (dict, optional): A dictionary specifying memory order overrides for individual LLMs.
+                  The dictionary should have the following structure:
+                  ```
+                  {
+                      "router_memory_order": int,  # Memory order for the router LLM
+                      "router_long_context_context": int, # Long context order for the router LLM
+                      "evaluator_memory_order": int, # Memory order for the evaluator LLM
+                      "evaluator_long_context_order": int, # Long context order for the evaluator LLM
+                      "reflector_memory_order": int, # Memory order for the reflector LLM
+                      "reflector_long_context_order": int, # Long context order for the reflector LLM
+                      "planner_memory_order": int, # Memory order for the planner LLM (if plan is True)
+                      "planner_long_context_order": int # Long context order for the planner LLM (if plan is True)
+                  }
+                  ```
+                  If a specific LLM's memory order is not provided in the dictionary, the default `memory_order` and `long_context_order` values will be used.
 
         Raises:
             ValueError: If agent_name already exists.
@@ -135,12 +152,33 @@ class AgentManager:
         # Initialize LLM models
         model_config = self._load_model_config()
         llm_args = {"temperature": 0.2, "memory_order": memory_order, "extra_context": self.context, "long_context": long_context,"long_context_order":long_context_order}
-        llm_router = MASGenerativeModel(model_config["router"]["model_name"], category=model_config["router"]["category"], prompt_template=chat_prompts[0], **llm_args)
-        llm_evaluator = MASGenerativeModel(model_config["evaluator"]["model_name"], category=model_config["evaluator"]["category"], prompt_template=chat_prompts[1], **llm_args)
-        llm_reflector = MASGenerativeModel(model_config["reflector"]["model_name"], category=model_config["reflector"]["category"], prompt_template=chat_prompts[2], **llm_args)
-        llm_planner = MASGenerativeModel(model_config["planner"]["model_name"], category=model_config["planner"]["category"], prompt_template=chat_prompts[3], **llm_args) if plan else None
+        
+        
+        
+        
+        def override_memory_order(llm_name, llm_args, memory_order, long_context_order, kwargs):
+            temp_args=llm_args.copy()
+            if "order_dict" in kwargs:
+                memory_order_dict = kwargs["order_dict"]
+                temp_args["memory_order"] = memory_order_dict.get(f"{llm_name}_memory_order", memory_order)
+                temp_args["long_context_order"] = memory_order_dict.get(f"{llm_name}_long_context_order", long_context_order)
+            return temp_args
+        
+        llm_router_args = override_memory_order("router", llm_args, memory_order, long_context_order, kwargs)
+        llm_router = MASGenerativeModel(model_config["router"]["model_name"], category=model_config["router"]["category"], prompt_template=chat_prompts[0], **llm_router_args)
 
-        # Create and register agent
+        llm_evaluator_args = override_memory_order("evaluator", llm_args, memory_order, long_context_order, kwargs)
+        llm_evaluator = MASGenerativeModel(model_config["evaluator"]["model_name"], category=model_config["evaluator"]["category"], prompt_template=chat_prompts[1], **llm_evaluator_args)
+
+        llm_reflector_args = override_memory_order("reflector", llm_args, memory_order, long_context_order, kwargs)
+        llm_reflector = MASGenerativeModel(model_config["reflector"]["model_name"], category=model_config["reflector"]["category"], prompt_template=chat_prompts[2], **llm_reflector_args)
+
+        if plan:
+            llm_planner_args = override_memory_order("planner", llm_args, memory_order, long_context_order, kwargs)
+            llm_planner = MASGenerativeModel(model_config["planner"]["model_name"], category=model_config["planner"]["category"], prompt_template=chat_prompts[3], **llm_planner_args)
+        else:
+            llm_planner = None
+
         agent = Agent(agent_name, llm_router, llm_evaluator, llm_reflector, llm_planner, tool_mapping, AnswerFormat, self.logging, shared_memory_order=shared_memory_order)
         self.agents[agent_name] = agent
         self.agent_prompts[agent_name] = system_prompt
@@ -180,7 +218,7 @@ class AgentManager:
         capabilities_str = ", ".join(details.capabilities)
         
         prompt_parts = [
-            f"Your Name: {agent_name}.\n Your capabilities are {capabilities_str}",
+            f"Name: {agent_name}.\n Your capabilities are {capabilities_str}",
             f"Response Style: {details.style}."
         ]
         

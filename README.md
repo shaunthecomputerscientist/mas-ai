@@ -1,5 +1,7 @@
 # MAS AI: Multi-Agent System Framework
 
+![MASAI](/MAS/Logo/image.png)
+
 MAS AI is a powerful framework for building scalable, intelligent multi-agent systems with advanced memory management and flexible collaboration patterns built using langgraph.
 
 - Each agent in mas-ai has different components that work together to achieve the goal.

@@ -1,5 +1,5 @@
 from langgraph.graph import END, StateGraph, START
-from typing import List, Dict, Any, Literal, TypedDict, Tuple, Union, Type
+from typing import List, Dict, Any, Literal, TypedDict, Tuple, Union, Type, Optional
 from pydantic import BaseModel, Field
 import ast, os
 from dotenv import load_dotenv
@@ -22,6 +22,7 @@ class State(TypedDict):
     current_node: str
     previous_node: str
     plan: List[str]
+    passed_from: str
 class Agent:
     """Agent Made Out of Routing-Evaluator-Reflector Architecture"""
     _logger=None
@@ -76,6 +77,26 @@ class Agent:
         self.node:str='evaluator'
         self.retain_messages_order=20
 
+
+    def set_context(self,context:Optional[Dict]=None,mode="set"):
+        """Set Context Either to override existing context passed to Agent Manager or Define new Context for all components.
+        Two modes: update or set.
+        """
+        components = [self.llm_evaluator,self.llm_reflector, self.llm_router,self.llm_planner]
+        try:
+            if context:
+                for component in components:
+                    if component is not None:
+                        if mode=='set':
+                            component.info=context
+                        elif mode=='update':
+                            component.info.update(context)
+        except Exception as e:
+            raise e
+        
+                        
+                    
+        
     def gettoolinput(self, tool_input : dict, tool_name: str)->Union[Dict,str]:
         tool_input = parse_tool_input(tool_input, list((self.tool_mapping[tool_name]).args_schema.schema()['properties'].keys()))
         return tool_input
@@ -125,9 +146,12 @@ class Agent:
                             output_structure=self.pydanticmodel, 
                             agent_context=self.agent_context if self.agent_context else None, 
                             agent_name=self.agent_name,
-                            component_context=component_context if component_context else [])
+                            component_context=component_context if component_context else [],
+                            passed_from=state['passed_from'])
             if self.logger:
                 self.logger.info(f"{parsed_response['answer']}")
+            if state['passed_from'] is not None:
+                state['passed_from']=None
             current_state = state
             current_state = self._update_state(current_state, parsed_response,node)
             return current_state
@@ -187,6 +211,7 @@ class Agent:
             return state
 
         state['tool_output'] = str(result)
+        state['passed_from']=tool_name
         state["messages"].append({"role": f"Tool: {tool_name}", "tool_output": state['tool_output']})
         return state
 
@@ -226,9 +251,9 @@ class Agent:
         else:
             component_context=[]
         if state['previous_node']=='planner':
-            prompt = f"""<CURRENT STAGE>: REFLECTION STAGE\n\n <GOAL>: Reflect on gathered component_context, think and arrive at solution. \n\n<LAST USED TOOL>{state['current_tool']}\n\n<TOOL OUTPUT>{state['tool_output']} \n\n<QUESTION> : {messages[0]['content']}\n\n<PLAN>: {state['plan']}"""
+            prompt = f"""<CURRENT STAGE>: REFLECTION STAGE\n\n <GOAL>: Reflect/Reason on gathered component_context, think and arrive at solution. \n\n<LAST USED TOOL>{state['current_tool']}\n\n<TOOL OUTPUT>{state['tool_output']} \n\n<QUESTION> : {messages[0]['content']}\n\n<PLAN>: {state['plan']}"""
         else:
-            prompt = f"""<CURRENT STAGE>: REFLECTION STAGE\n\n <GOAL>: Reflect on gathered component_context, think and arrive at solution. \n\n<LAST USED TOOL>{state['current_tool']}\n\n<TOOL OUTPUT>{state['tool_output']} \n\n<QUESTION> : {messages[0]['content']}"""
+            prompt = f"""<CURRENT STAGE>: REFLECTION STAGE\n\n <GOAL>: Reflect/Reason on gathered component_context, think and arrive at solution. \n\n<LAST USED TOOL>{state['current_tool']}\n\n<TOOL OUTPUT>{state['tool_output']} \n\n<QUESTION> : {messages[0]['content']}"""
         current_state = self.node_handler(state, self.llm_reflector,prompt,component_context=component_context,node='reflector')
         if self.logger:
             self.logger.info("--------------------Reflection End-----------------------------")
@@ -243,7 +268,7 @@ class Agent:
             component_context=self.llm_reflector.chat_history[-self.shared_memory_order:]
         else:
             component_context=[]
-        prompt = f"""<CURRENT STAGE>: PLANNER STAGE\n\n <GOAL>: Plan the tasks to accomplish the goal. \n\n<QUESTION> : {messages[0]['content']}"""
+        prompt = f"""<CURRENT STAGE>: PLANNING STAGE\n\n <GOAL>: Plan tasks logically to accomplish the goal. \n\n<QUESTION> : {messages[0]['content']}"""
         current_state = self.node_handler(state, self.llm_planner,prompt,component_context=component_context,node='planner')
         return current_state
 
@@ -290,7 +315,8 @@ class Agent:
             sanitized = sanitized.replace(old, new)
         return sanitized
 
-    def initiate_agent(self, query: str):
+    def initiate_agent(self, query: str, passed_from:str=None):
+        """Takes in query. Optional passed_from to let llm know if it's an agent, tool, or user who initated this agent."""
         new_query = self._sanitize_query(query)
         if self.logger:
             self.logger.debug(self.agent_name)
@@ -305,10 +331,10 @@ class Agent:
             delegate_to_agent=None,
             current_node='router',
             previous_node=None,
+            passed_from=passed_from
         )
         response = self.app.invoke(initial_state, {"recursion_limit": 100})
         return response
-
 
 
 
