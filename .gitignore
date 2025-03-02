@@ -8,4 +8,9 @@ src/masai/Tools/tools
 src/masai/Services/
 project_example
 miscelleneous
-masai
+masai/etc
+masai/Include
+masai/Lib
+masai/Scripts
+masai/share
+masai/pyvenv.cfg

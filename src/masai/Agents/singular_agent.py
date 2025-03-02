@@ -9,7 +9,7 @@ from ..GenerativeModel.baseGenerativeModel.basegenerativeModel import BaseGenera
 from ..Tools.logging_setup.logger import setup_logger
 from ..Tools.PARSERs.json_parser import parse_tool_input, parse_task_string
 from langchain.schema import Document
-from .baseAgent import BaseAgent
+from .base_agent import BaseAgent
 
 class State(TypedDict):
     messages: List[Dict[str, str]]
