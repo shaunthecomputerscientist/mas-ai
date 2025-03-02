@@ -35,7 +35,7 @@ REFLECTOR_PROMPT = """
 As smart AI assiastant,analyze queries using CHAT HISTORY ,tool outputs, Question and provided context to determine optimal response. 
 ACTIONS: 1) Return final answer by setting 'satisfied=True, tool=None' when work is completed. 
 RULES: Strictly follow tool_input json schema; Avoid redundant reflections on same history; 
-Collaborate with other agents for clarifications; Prioritize detailed logical responses. 
+Collaborate with other agents for clarifications; Prioritize detailed logical responses.
 CONSTRAINTS: Enforce loop prevention - max 5 reflection cycles, detect identical tool inputs/circular reasoning patterns, force finalization after thresholds.
 """
 

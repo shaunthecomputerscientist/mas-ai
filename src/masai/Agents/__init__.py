@@ -1,1 +1,1 @@
-from .singular_agent import Agent 
+from .singular_agent import Agent, BaseAgent

@@ -78,21 +78,21 @@ manager.create_agent(
     agent_name="research_agent",
     tools=tools_for_researcher,
     agent_details=research_agent_details,
-    plan=False
+    plan=True
 )
 
 manager.create_agent(
     agent_name="general_personal_agent",
     tools=tools_for_personal,
     agent_details=personal_agent_details,
-    plan=False
+    plan=True
 )
 
 manager.create_agent(
     agent_name="productivity_agent",
     tools=tools_for_productivity,
     agent_details=productivity_agent_details,
-    plan=False
+    plan=True
     
 )
 
@@ -136,7 +136,7 @@ manager.get_agent('research_agent').display()
 #         print("\nExiting...")
 #         break
     
-mas_decentralized = MultiAgentSystem(agentManager=manager, isVision=False)
+mas_decentralized = MultiAgentSystem(agentManager=manager)
 
 while True:
     query=input("Enter your query: ")
@@ -152,18 +152,3 @@ while True:
         color='blue',
         token_type='word'
     )
-
-# process_vision_task(model="gemini-2.0-flash-001",query="Search for youtube and play hare hare ya. You can use start/win button to open a search bar or use searchbar")
-
-# print(search_tool.invoke({'query':'todays tech news about Elon','source_categories':['tech']}))
-
-# from src.masai.Tools.tools.Vectorstore.lightRag import GraphRAG, visualize_dynamic_graph
-# import os
-
-# graph_rag = GraphRAG(
-#     neo4j_uri=os.environ.get("NEO4J_URI"),
-#     neo4j_username=os.environ.get("NEO4J_USERNAME"),
-#     neo4j_password=os.environ.get("NEO4J_PASSWORD"),
-# )
-
-# visualize_dynamic_graph(graph_rag=graph_rag)

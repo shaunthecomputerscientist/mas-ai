@@ -39,7 +39,7 @@ class MultiAgentState(TypedDict):
     pending_tasks: Dict[str, Callable]
 
 class MultiAgentSystem:
-    def __init__(self,agentManager:AgentManager,isVision=False, supervisor_config: Optional[SupervisorConfig] = None, result_callback=None):
+    def __init__(self,agentManager:AgentManager, supervisor_config: Optional[SupervisorConfig] = None, result_callback=None):
         self.agentManager = agentManager
         self.num_agents = len(self.agentManager.agents)
         
