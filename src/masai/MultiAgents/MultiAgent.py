@@ -232,7 +232,7 @@ class MultiAgentSystem:
             
         return agent_output
     
-    def initiate_hierarchical_mas(self, query: str, callback=None) -> Dict[str, Any]:
+    async def initiate_hierarchical_mas(self, query: str, callback=None) -> Dict[str, Any]:
             """Initiate a task and optionally monitor for completion non-blockingly.
             This function is used to initiate a task and monitor for completion non-blockingly.
             It is hierarchical because it uses a supervisor to delegate the task to the appropriate agent.
@@ -250,11 +250,7 @@ class MultiAgentSystem:
 
             # If a callback is provided and task is queued, monitor asynchronously
             if callback and result["status"] == "queued":
-                threading.Thread(
-                    target=self._monitor_task,
-                    args=(result["task_id"], callback),
-                    daemon=True
-                ).start()
+                asyncio.create_task(self._monitor_task(result["task_id"], callback))
 
             return result
 
@@ -296,7 +292,7 @@ class TaskManager:
             f"METADATA"
             f"Current pending tasks: {self.pending_tasks}\n"
             f"Processing: {self.task_queue}\n"
-            f"---------------------------------------------"
+            f"\n---------------------------------------------\n"
             f"QUESTION: {query}\n"
         )
         decision = self.supervisor.generate_response_mas(supervisor_prompt, self.supervisorModel, self.agents)
@@ -385,7 +381,7 @@ class TaskManager:
         """Notify the supervisor to review the task result."""
         supervisor_prompt = (
             f"Current pending tasks: {self.pending_tasks}\n"
-            f"Task ID: {task_id}\n"
+            f"This Task ID: {task_id}\n"
             f"Agent: {agent_name}\n"
             f"Original Query: {original_query}\n"
             f"Agent Steps: {agent_output['messages'][-3:] if agent_output.get('messages') else 'No steps'}\n"
@@ -397,7 +393,7 @@ class TaskManager:
             output_structure=self.supervisorModel,
             agent_context=self.agents
         )
-        print(decision)
+        # print(decision)
         if str(decision.get("delegate_to_agent")).lower() != "none":
             return {
                 "status": "requires_revision",

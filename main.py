@@ -19,13 +19,14 @@ import threading
 from threading import Thread
 import time
 import concurrent.futures
+import asyncio
 
 # User provides path to their model config
 model_config_path = os.path.join(os.getcwd(), 'model_config.json')
 
 manager = AgentManager(
     context={"HUMAN NAME": "SHAUN"},
-    logging=True,
+    logging=False,
     model_config_path=model_config_path
 )
 
@@ -96,59 +97,58 @@ manager.create_agent(
     
 )
 
-manager.get_agent('research_agent').display()
 
-# supervisor_config = SupervisorConfig(
-#     model_name="gemini-2.0-flash-exp",
-#     temperature=0.7,  # Standard temperature for balanced creativity/consistency
-#     model_category="gemini",
-#     memory_order=20,  # Keep last 20 messages in context
-#     memory=True,      # Enable memory/context tracking
-#     extra_context={"user name": "shaun"}  # Additional context for supervisor role
-# )
+supervisor_config = SupervisorConfig(
+    model_name="gemini-2.0-flash-exp",
+    temperature=0.7,  # Standard temperature for balanced creativity/consistency
+    model_category="gemini",
+    memory_order=20,  # Keep last 20 messages in context
+    memory=True,      # Enable memory/context tracking
+    extra_context={"user name": "shaun"},  # Additional context for supervisor role
+    supervisor_system_prompt=None
+)
 
-# # Simplified main execution flow
-# # Assuming manager and supervisor_config are defined
-# def handle_task_result(task):
-#     """Callback function to handle completed task results."""
-#     print("--------------------------------")
-#     token_stream(task['answer'], delay=0.05, color='blue', token_type='word')
-#     print("--------------------------------")
+# Simplified main execution flow
+# Assuming manager and supervisor_config are defined
+def handle_task_result(task):
+    """Callback function to handle completed task results."""
+    print("--------------------------------")
+    token_stream(task['answer'], delay=0.05, color='blue', token_type='word')
+    print("--------------------------------")
 
-# # Initialize MultiAgentSystem with result callback
-# mas_hierarchical = MultiAgentSystem(
-#     agentManager=manager,
-#     isVision=False,
-#     supervisor_config=supervisor_config,
-#     result_callback=handle_task_result
-# )
+# Initialize MultiAgentSystem with result callback
+mas_hierarchical = MultiAgentSystem(
+    agentManager=manager,
+    supervisor_config=supervisor_config,
+    result_callback=handle_task_result
+)
 
-# # Main loop for continuous querying
-# while True:
-#     try:
-#         query = input("Enter a query :\n")
-#         if query.lower() == 'exit':
-#             break
-#         result = mas_hierarchical.initiate_hierarchical_mas(query, callback=handle_task_result)
-        
-#         token_stream(result['answer'] or 'No answer', delay=0.05, color='blue', token_type='word')
-#     except KeyboardInterrupt:
-#         print("\nExiting...")
-#         break
-    
-mas_decentralized = MultiAgentSystem(agentManager=manager)
-
+# Main loop for continuous querying
 while True:
-    query=input("Enter your query: ")
-    result = mas_decentralized.initiate_decentralized_mas(
-            query=query,
-            set_entry_agent=manager.get_agent(agent_name="general_personal_agent")
-        )
-    # result = manager.get_agent(agent_name='research_agent').initiate_agent(query)
-    # print(result)
-    token_stream(
-        result['answer'],
-        delay=0.05,
-        color='blue',
-        token_type='word'
-    )
+    try:
+        query = input("Enter a query :\n")
+        if query.lower() == 'exit':
+            break
+        result = asyncio.run(mas_hierarchical.initiate_hierarchical_mas(query, callback=handle_task_result))
+        
+        token_stream(result['answer'] or 'No answer', delay=0.05, color='blue', token_type='word')
+    except KeyboardInterrupt:
+        print("\nExiting...")
+        break
+    
+# mas_decentralized = MultiAgentSystem(agentManager=manager)
+
+# while True:
+#     query=input("Enter your query: ")
+#     result = mas_decentralized.initiate_decentralized_mas(
+#             query=query,
+#             set_entry_agent=manager.get_agent(agent_name="general_personal_agent")
+#         )
+#     # result = manager.get_agent(agent_name='research_agent').initiate_agent(query)
+#     # print(result)
+#     token_stream(
+#         result['answer'],
+#         delay=0.05,
+#         color='blue',
+#         token_type='word'
+#     )

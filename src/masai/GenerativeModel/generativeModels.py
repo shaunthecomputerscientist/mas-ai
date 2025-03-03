@@ -14,6 +14,7 @@ from langchain_core.messages import AIMessage
 from langchain.schema import Document
 from datetime import datetime, timezone
 from ..GenerativeModel.baseGenerativeModel.basegenerativeModel import BaseGenerativeModel
+from ..prompts.prompt_templates import SUMMARY_PROMPT
 
 class GenerativeModel(BaseGenerativeModel):
     def __init__(
@@ -119,20 +120,13 @@ class MASGenerativeModel(BaseGenerativeModel):
         Returns:
             Tuple of (updated context summaries, truncated messages)
         """
-        system_prompt = f"""YOU Can create informative summaries in sequence of long conversations between human and ai. Summarize the conversation
-        in as less words as possible (100-200 words) while also retaining key information of the conversation. Capture things like, what was being talked about?
-        What is the main topic of the conversation? What is the main idea of the conversation? What is the main conclusion of the conversation?\n
-        This should be done in passive voice from third person point of view.
-        Conversation:\n
-        {messages}
-        """
         
         try:
-            summary = self.llm_long_context.generate_response(system_prompt)
+            summary = self.llm_long_context.generate_response(SUMMARY_PROMPT.format(messages=messages))
             print("Summary Added")
             self.context_summaries.append(Document(page_content=summary))
             
-            if len(self.context_summaries) > 2*self.long_context_order:
+            if len(self.context_summaries) > self.long_context_order:
                 self.context_summaries = self.context_summaries[-self.long_context_order:]
                 
             truncated_messages = messages[-self.memory_order//2:]
@@ -166,11 +160,15 @@ class MASGenerativeModel(BaseGenerativeModel):
             self.context_summaries, truncated_messages = self._update_long_context(self.chat_history)
             self.chat_history=truncated_messages
         
+        if 'passed_from' in kwargs:
+            role=kwargs['passed_from']
+        else:
+            role=agent_name
         if component_context:
             self.chat_history.extend(component_context)
-            self.chat_history.append({'role': kwargs['passed_from'] if kwargs['passed_from'] else agent_name, 'content': prompt})
+            self.chat_history.append({'role': role, 'content': prompt})
         else:
-            self.chat_history.append({'role': kwargs['passed_from'] if kwargs['passed_from'] else agent_name, 'content': prompt})
+            self.chat_history.append({'role': role, 'content': prompt})
 
         # Prepare MAS-specific inputs
         mas_inputs = {
@@ -192,7 +190,7 @@ class MASGenerativeModel(BaseGenerativeModel):
             
             # Update chat history with structured response
             if isinstance(response, dict) and 'answer' in response:
-                self.chat_history.append({'role': f'{agent_name}', 'content': response['answer']})
+                self.chat_history.append({'role': role, 'content': response['answer']})
             
             return response
             

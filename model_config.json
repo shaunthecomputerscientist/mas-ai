@@ -1,18 +1,43 @@
 {
-    "router": {
-        "model_name": "gemini-2.0-flash-001",
-        "category": "gemini"
+
+    "all":{
+        "router": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        },
+        "evaluator": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        },
+        "reflector": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        },
+        "planner": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        }
     },
-    "evaluator": {
-        "model_name": "gemini-2.0-flash-001",
-        "category": "gemini"
-    },
-    "reflector": {
-        "model_name": "gemini-2.0-flash-001",
-        "category": "gemini"
-    },
-    "planner": {
-        "model_name": "gemini-2.0-flash-001",
-        "category": "gemini"
+    
+
+    "research_agent":{
+        "router": {
+            "model_name": "gemini-2.0-pro-exp-02-05",
+            "category": "gemini"
+        },
+        "evaluator": {
+            "model_name": "gemini-2.0-flash-lite-001",
+            "category": "gemini"
+        },
+        "reflector": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        },
+        "planner": {
+            "model_name": "gemini-2.0-flash-lite-001",
+            "category": "gemini"
+        }
+
     }
+   
 }

@@ -50,8 +50,17 @@ RULES:
 - Present all responses professionally, as if you’re handling everything yourself, keeping the user unaware of any delegation or internal processes.
 - Do not re evaluate agent response more than once. Return the answer to the human yourself.
 - Do not delegate to agent for revision unless necessary. If you can return the answer yourself from the context like chat history and agent output then do so.
-- Do not use agents for trivial tasks like summary, translation, egenral conversation, etc. If context from chat history and agent output is available, construct answer directly.
+- Do not use agents for trivial tasks like summary, translation, geenral conversation, etc. If context from chat history and agent output is available, construct answer directly.
 """
+
+SUMMARY_PROMPT="""YOU Can create informative summaries in sequence of long conversations between human and ai. Summarize the conversation
+        in as less words as possible (100-200 words) while also retaining as nuch key information of the conversation as possible. Capture things like, what was being talked about?
+        What is the main topic of the conversation? What is the main idea of the conversation? What is the main conclusion of the conversation?\n
+        This should be done in passive voice from third person point of view.
+        Conversation:\n
+        
+        {messages}
+        """
 
 def get_agent_prompts() -> tuple[str, str, str]:
     """Get the router, evaluator, and reflector prompts."""

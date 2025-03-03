@@ -62,23 +62,53 @@ Then make a model_config.json file in the root directory and define the model na
 
 - setup model config in `model_config.json`
 
+This setup gives your finer control over each component of the agent.
+
 ```json
-    "router": {
-        "model_name": "gemini-2.0-flash-001",
-        "category": "gemini"
+{
+// By default models in 'all' are chosen unless specific agent specification is mentioned. Use this by default. Ensure to provide specifications for each agent if this is not used.
+
+    "all":{
+        "router": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        },
+        "evaluator": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        },
+        "reflector": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        },
+        "planner": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        }
     },
-    "evaluator": {
-        "model_name": "gemini-2.0-flash-001",
-        "category": "gemini"
-    },
-    "reflector": {
-        "model_name": "gemini-2.0-flash-001",
-        "category": "gemini"
-    },
-    "planner": {
-        "model_name": "gemini-2.0-flash-001",
-        "category": "gemini"
+    
+//Optionally if you want different models for a specific agent then mention the models of the components of that agent. In this example only research agent specification is provided. Other two agents will draw it's specification from "all".
+    "research_agent":{
+        "router": {
+            "model_name": "gemini-2.0-pro-exp-02-05",
+            "category": "gemini"
+        },
+        "evaluator": {
+            "model_name": "gemini-2.0-flash-lite-001",
+            "category": "gemini"
+        },
+        "reflector": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        },
+        "planner": {
+            "model_name": "gemini-2.0-flash-lite-001",
+            "category": "gemini"
+        }
+
     }
+   
+}
 ```
 
 
