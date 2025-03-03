@@ -64,9 +64,12 @@ Then make a model_config.json file in the root directory and define the model na
 
 This setup gives your finer control over each component of the agent.
 
+### By default models in 'all' are chosen unless specific agent specification is mentioned. Use this by default. Ensure to provide specifications for each agent if this is not used ###
+
+### Optionally if you want different models for a specific agent then mention the models of the components of that agent. In this example only research agent specification is provided. Other two agents will draw it's specification from "all". ###
+
 ```json5
 {
-// By default models in 'all' are chosen unless specific agent specification is mentioned. Use this by default. Ensure to provide specifications for each agent if this is not used.
 
     "all":{
         "router": {
