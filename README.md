@@ -64,7 +64,7 @@ Then make a model_config.json file in the root directory and define the model na
 
 This setup gives your finer control over each component of the agent.
 
-```json
+```json5
 {
 // By default models in 'all' are chosen unless specific agent specification is mentioned. Use this by default. Ensure to provide specifications for each agent if this is not used.
 
@@ -87,7 +87,7 @@ This setup gives your finer control over each component of the agent.
         }
     },
     
-//Optionally if you want different models for a specific agent then mention the models of the components of that agent. In this example only research agent specification is provided. Other two agents will draw it's specification from "all".
+
     "research_agent":{
         "router": {
             "model_name": "gemini-2.0-pro-exp-02-05",
