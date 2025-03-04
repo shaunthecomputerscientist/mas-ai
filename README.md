@@ -1,3 +1,5 @@
+**<span style="color:red;">PLEASE STAR THE PROJECT IF YO LIKE IT, BEFORE CLONING. A LOT OF PEOPLE CLONE WITHOUT STARRING**</span>
+
 # MAS AI: Multi-Agent System Framework
 
 |                                     |
