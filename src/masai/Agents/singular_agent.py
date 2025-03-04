@@ -142,7 +142,7 @@ class Agent(BaseAgent):
         if self.node=='reflector':
             state['reflection_counter']+=1
         else:
-            state['reflection_counter']=0
+            state['reflection_counter']=1
         component_context = (
             self.llm_router.chat_history[-self.shared_memory_order:] if state['previous_node'] == 'router' else
             self.llm_evaluator.chat_history[-self.shared_memory_order:] if state['previous_node'] == 'evaluator' else

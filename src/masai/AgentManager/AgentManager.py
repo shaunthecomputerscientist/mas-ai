@@ -18,7 +18,7 @@ class AgentDetails:
     style: str = "gives very elaborate answers"  # Communication style
     
 class AgentManager:
-    def __init__(self, logging=True, context:dict=None, model_config_path=None):
+    def __init__(self, logging=True, context:dict=None, model_config_path=None, chat_log:str=None):
         """Initialize the AgentManager with an empty registry of agents.
 
         The AgentManager class serves as a central registry for creating, managing, and 
@@ -29,6 +29,8 @@ class AgentManager:
                 Defaults to True.
             context (dict, optional): Additional contextual information to be shared 
                 with all agents. Defaults to None.
+            chat_log (str, optional): Path to file where chat log needs to be saved.
+                Defaults to None.
 
         Attributes:
             agents (dict[str, Agent]): Dictionary storing agent instances,
@@ -42,6 +44,7 @@ class AgentManager:
         self.agent_prompts = {}
         self.logging = logging
         self.context = context
+        self.chat_log=chat_log
         
         # model_config_path should be provided by user
         if not model_config_path:
@@ -160,7 +163,11 @@ class AgentManager:
 
         # Initialize LLM models
         model_config = self._load_model_config(agent_name)
-        llm_args = {"temperature": temperature, "memory_order": memory_order, "extra_context": self.context, "long_context": long_context,"long_context_order":long_context_order}
+        llm_args = {"temperature": temperature, "memory_order": memory_order, 
+                    "extra_context": self.context, 
+                    "long_context": long_context,
+                    "long_context_order":long_context_order,
+                    "chat_log":self.chat_log}
         
         
         
@@ -236,6 +243,7 @@ class AgentManager:
             prompt_parts.append(details.description)
                 
         return "\n".join(prompt_parts)
+    
 
     def get_agent(self, agent_name: str)->Agent:
         """Retrieve an agent by name."""

@@ -39,7 +39,15 @@ class MultiAgentState(TypedDict):
     pending_tasks: Dict[str, Callable]
 
 class MultiAgentSystem:
-    def __init__(self,agentManager:AgentManager, supervisor_config: Optional[SupervisorConfig] = None, result_callback=None):
+    def __init__(self,agentManager:AgentManager, supervisor_config: Optional[SupervisorConfig] = None, heirarchical_mas_result_callback=None, agent_return_direct:bool=False):
+        """Initialize a Multi Agent System to grop many agents together in varios ways.
+
+        Args:
+            agentManager (AgentManager): AgentManager instance for agents.
+            supervisor_config (Optional[SupervisorConfig], optional): If heirarchical mas is used, supervisor config is important to initialize a supervisor. Defaults to None.
+            heirarchical_mas_result_callback (_type_, optional): Callback for the answers generated while executing heirarchical mas. Defaults to None.
+            agent_return_direct (bool, optional): If False, supervisor evaluates agent response before returning. Defaults to False.
+        """
         self.agentManager = agentManager
         self.num_agents = len(self.agentManager.agents)
         
@@ -57,12 +65,13 @@ class MultiAgentSystem:
             )
             self.mode = "hierarchical"
             self.supervisorModel=structure_supervisor(self.agentManager.agents)
-            # self.task_queue = Queue()
-            # self.executor = ThreadPoolExecutor(max_workers=5)  # Adjust based on needs
-            # self.callbacks: Dict[str, Queue] = {}  # Store callback queues for each task
-            # self.agentManager._compile_agents(type=self.mode,agent_context={'SUPERVISOR AGENT':self._load_supervisorPrompt()})
             self.agentManager._compile_agents()
-            self.task_manager = TaskManager(self.agentManager.agents, self.supervisor, self.supervisorModel, self.initiate_decentralized_mas,result_callback=result_callback, logging=self.agentManager.logging)
+            self.task_manager = TaskManager(self.agentManager.agents, self.supervisor, 
+                                            self.supervisorModel, 
+                                            self.initiate_decentralized_mas,
+                                            result_callback=heirarchical_mas_result_callback,
+                                            logging=self.agentManager.logging, 
+                                            return_direct=agent_return_direct)
             self.task_ids = []
 
         else:
@@ -173,7 +182,7 @@ class MultiAgentSystem:
         
         return current_query
 
-    def initiate_decentralized_mas(self, query: str, set_entry_agent: Agent,memory_order:int=3):
+    def initiate_decentralized_mas(self, query: str, set_entry_agent: Agent,memory_order:int=3, passed_from:str="user"):
         """
         This function is used to initiate the decentralized multi-agent system.
         It is decentralized because control can be passed to any agent at any time.
@@ -193,7 +202,7 @@ class MultiAgentSystem:
             dict: Agent output
         """
         if self.state['last_agent'] in self.agentManager.agents.keys():
-            agent_output = self.agentManager.agents[self.state['last_agent']].initiate_agent(query=query, passed_from="user")
+            agent_output = self.agentManager.agents[self.state['last_agent']].initiate_agent(query=query, passed_from=passed_from)
             self._update_state(
                     message='|'.join(str(output.get('content', output.get('tool_output', ''))) 
                                     for output in agent_output['messages'][-memory_order:]),
@@ -202,7 +211,7 @@ class MultiAgentSystem:
                     reasoning=agent_output['reasoning']
                 )
         else:
-            agent_output = set_entry_agent.initiate_agent(query=query,passed_from="user")
+            agent_output = set_entry_agent.initiate_agent(query=query,passed_from=passed_from)
             self._update_state(
                         message='|'.join(str(output.get('content', output.get('tool_output', ''))) 
                                         for output in agent_output['messages'][-memory_order:]),
@@ -232,13 +241,12 @@ class MultiAgentSystem:
             
         return agent_output
     
-    async def initiate_hierarchical_mas(self, query: str, callback=None) -> Dict[str, Any]:
+    async def initiate_hierarchical_mas(self, query: str) -> Dict[str, Any]:
             """Initiate a task and optionally monitor for completion non-blockingly.
             This function is used to initiate a task and monitor for completion non-blockingly.
             It is hierarchical because it uses a supervisor to delegate the task to the appropriate agent.
             Parameters:
                 query (str): The query to be processed
-                callback (function, optional): A callback function to be called when the task is completed. Takes in task as argument.
             Returns:
                 dict: The result of the task. contains key 'answer'.
             """
@@ -249,14 +257,14 @@ class MultiAgentSystem:
             self.task_ids.append(result["task_id"])
 
             # If a callback is provided and task is queued, monitor asynchronously
-            if callback and result["status"] == "queued":
-                asyncio.create_task(self._monitor_task(result["task_id"], callback))
+            if self.task_manager.result_callback and result["status"] == "queued":
+                asyncio.create_task(self._monitor_task(result["task_id"], self.task_manager.result_callback))
 
             return result
 
     async def _monitor_task(self, task_id: str, callback: Callable[[Dict], None] | Callable[[Dict], Awaitable[None]]):
         while task_id in self.task_manager.pending_tasks:
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
             completed = await self.task_manager.get_completed_tasks()
             for task in completed:
                 if task["task_id"] == task_id:
@@ -269,9 +277,9 @@ class MultiAgentSystem:
 
 class TaskManager:
     def __init__(self, agents: Dict[str, Any], supervisor: Any, supervisorModel, decentralized_mas_function,
-                 result_callback=None, logging=False):
+                 result_callback=None, logging=False, return_direct:bool=False):
         self.agents = agents
-        self.supervisor = supervisor
+        self.supervisor: MASGenerativeModel = supervisor
         self.supervisorModel = supervisorModel
         self.decentralized_mas_function = decentralized_mas_function
         self.task_queue = Queue()
@@ -282,6 +290,7 @@ class TaskManager:
         self.check_interval = 2  # Check interval in seconds
         self.result_callback = result_callback  # Callback for completed tasks
         self.logging = logging
+        self.return_direct=return_direct
 
         # Start periodic check in a background thread
         self.periodic_check_thread = threading.Thread(target=self._periodic_check, daemon=True)
@@ -295,14 +304,14 @@ class TaskManager:
             f"\n---------------------------------------------\n"
             f"QUESTION: {query}\n"
         )
-        decision = self.supervisor.generate_response_mas(supervisor_prompt, self.supervisorModel, self.agents)
+        decision = self.supervisor.generate_response_mas(supervisor_prompt, self.supervisorModel, self.agents,passed_from='Supervisor')
         if str(decision.get("delegate_to_agent")).lower() == "none":
             # Supervisor provided a direct answer; return it immediately
             return {"status": "completed", "answer": decision['answer'], "task_id": f"direct_{time.time()}"}
         else:
             # Delegate to an agent; process in background and return task ID
             task_id = f"task_{len(self.pending_tasks) + 1}"
-            self.pending_tasks[task_id] = {
+            self.pending_tasks[task_id if task_id not in self.pending_tasks else f"task_{len(self.pending_tasks) + 5}"] = {
                 "agent": decision["delegate_to_agent"],
                 "status": "queued",
                 "query": query,
@@ -331,14 +340,21 @@ class TaskManager:
         """Execute a task by invoking the appropriate agent."""
         try:
             agent = self.agents[agent_name.lower()]
-            agent_output = self.decentralized_mas_function(query=agent_input, set_entry_agent=agent)
-            return self._notify_supervisor(
-                task_id=task_id,
-                agent_name=agent_name,
-                agent_output=agent_output,
-                original_query=query,
-                supervisor_reasoning=supervisor_reasoning
-            )
+            agent_output = self.decentralized_mas_function(query=agent_input, set_entry_agent=agent, passed_from="Supervisor")
+            if not self.return_direct:
+                return self._notify_supervisor(
+                    task_id=task_id,
+                    agent_name=agent_name,
+                    agent_output=agent_output,
+                    original_query=query,
+                    supervisor_reasoning=supervisor_reasoning
+                )
+            elif self.return_direct:
+                    return {
+                        "status": "completed",
+                        "answer": agent_output["answer"],
+                        "task_id": task_id
+                    }
         except Exception as e:
             if self.logging:
                 self.logger.error(f"Task {task_id} failed: {str(e)}")
@@ -391,7 +407,8 @@ class TaskManager:
         decision = self.supervisor.generate_response_mas(
             prompt=supervisor_prompt,
             output_structure=self.supervisorModel,
-            agent_context=self.agents
+            agent_context=self.agents,
+            passed_from="Supervisor",
         )
         # print(decision)
         if str(decision.get("delegate_to_agent")).lower() != "none":

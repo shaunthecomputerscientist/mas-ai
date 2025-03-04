@@ -3,6 +3,7 @@
 #SAMPLE SCRIPT SHOWING EXAMPLE OF USING MAS-AI
 #---------------------------------AgentManager---------------------------------
 import os
+import sys
 from src.masai.AgentManager.AgentManager import AgentManager, AgentDetails
 from src.masai.MultiAgents.MultiAgent import MultiAgentSystem, SupervisorConfig
 #---------------------------------Tools---------------------------------
@@ -21,13 +22,17 @@ import time
 import concurrent.futures
 import asyncio
 
+
+
 # User provides path to their model config
 model_config_path = os.path.join(os.getcwd(), 'model_config.json')
 
+# Define Agent Manager
 manager = AgentManager(
     context={"HUMAN NAME": "SHAUN"},
     logging=False,
-    model_config_path=model_config_path
+    model_config_path=model_config_path,
+    chat_log='MAS/WORKSPACE/chat_log.json' # ensure it exixts
 )
 
 # Define tools
@@ -73,6 +78,7 @@ productivity_agent_details = AgentDetails(
     description="Specializing in productivity work for user like send/read emails, read meetings, set calendar events/schedules",
     style="focuses on efficient task execution and organization"
 )
+#----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 # Create agents with their respective details
 manager.create_agent(
@@ -96,7 +102,9 @@ manager.create_agent(
     plan=True
     
 )
+#---------------------------------------------------------------------------------------------------------
 
+# Create Supervisor
 
 supervisor_config = SupervisorConfig(
     model_name="gemini-2.0-flash-exp",
@@ -109,6 +117,7 @@ supervisor_config = SupervisorConfig(
 )
 
 # Simplified main execution flow
+
 # Assuming manager and supervisor_config are defined
 def handle_task_result(task):
     """Callback function to handle completed task results."""
@@ -116,39 +125,93 @@ def handle_task_result(task):
     token_stream(task['answer'], delay=0.05, color='blue', token_type='word')
     print("--------------------------------")
 
-# Initialize MultiAgentSystem with result callback
-mas_hierarchical = MultiAgentSystem(
-    agentManager=manager,
-    supervisor_config=supervisor_config,
-    result_callback=handle_task_result
-)
+# Function to run hierarchical MAS
+async def run_hierarchical_mas():
+    mas_hierarchical = MultiAgentSystem(
+        agentManager=manager,
+        supervisor_config=supervisor_config,
+        heirarchical_mas_result_callback=handle_task_result,
+        agent_return_direct=True
+    )
 
-# Main loop for continuous querying
-while True:
-    try:
-        query = input("Enter a query :\n")
-        if query.lower() == 'exit':
+    while True:
+        try:
+            query = input("Enter a query for hierarchical MAS:\n")
+            if query.lower() == 'exit':
+                break
+            result = await mas_hierarchical.initiate_hierarchical_mas(query)
+            token_stream(result['answer'] or 'No answer', delay=0.05, color='blue', token_type='word')
+        except KeyboardInterrupt:
+            print("\nExiting hierarchical MAS...")
             break
-        result = asyncio.run(mas_hierarchical.initiate_hierarchical_mas(query, callback=handle_task_result))
-        
-        token_stream(result['answer'] or 'No answer', delay=0.05, color='blue', token_type='word')
-    except KeyboardInterrupt:
-        print("\nExiting...")
-        break
-    
-# mas_decentralized = MultiAgentSystem(agentManager=manager)
 
-# while True:
-#     query=input("Enter your query: ")
-#     result = mas_decentralized.initiate_decentralized_mas(
-#             query=query,
-#             set_entry_agent=manager.get_agent(agent_name="general_personal_agent")
-#         )
-#     # result = manager.get_agent(agent_name='research_agent').initiate_agent(query)
-#     # print(result)
-#     token_stream(
-#         result['answer'],
-#         delay=0.05,
-#         color='blue',
-#         token_type='word'
-#     )
+# Function to run decentralized MAS
+def run_decentralized_mas():
+    mas_decentralized = MultiAgentSystem(agentManager=manager)
+
+    while True:
+        try:
+            query = input("Enter your query for decentralized MAS: ")
+            if query.lower() == 'exit':
+                break
+            result = mas_decentralized.initiate_decentralized_mas(
+                query=query,
+                set_entry_agent=manager.get_agent(agent_name="general_personal_agent")
+            )
+            token_stream(
+                result['answer'],
+                delay=0.05,
+                color='blue',
+                token_type='word'
+            )
+        except KeyboardInterrupt:
+            print("\nExiting decentralized MAS...")
+            break
+
+
+def run_sequential_mas():
+    agent_sequence = input("Enter agent sequence (comma-separated, e.g., research_agent,general_personal_agent):\n").split(',')
+    agent_sequence = [agent.strip() for agent in agent_sequence]  # Clean up whitespace
+    
+    while True:
+        try:
+            query = input("Enter your query for sequential MAS: ")
+            if query.lower() == 'exit':
+                break
+            
+            # Initialize MultiAgentSystem (without supervisor config)
+            mas_sequential = MultiAgentSystem(agentManager=manager)
+            
+            result = mas_sequential.initiate_sequential_mas(
+                query=query,
+                agent_sequence=agent_sequence,
+                memory_order=3  # You can adjust the memory order
+            )
+            token_stream(
+                result,  # The result is a string in sequential MAS
+                delay=0.05,
+                color='blue',
+                token_type='word'
+            )
+        except KeyboardInterrupt:
+            print("\nExiting sequential MAS...")
+            break
+        except Exception as e:
+            print(f"Error in sequential MAS: {e}")
+            break
+        
+        
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        execution_type = sys.argv[1].lower()
+        if execution_type == 'hierarchical':
+            asyncio.run(run_hierarchical_mas())
+        elif execution_type == 'decentralized':
+            run_decentralized_mas()
+        elif execution_type == 'sequential':
+            run_sequential_mas()
+        else:
+            print("Invalid execution type. Please specify 'hierarchical', 'decentralized', or 'sequential'.")
+    else:
+        print("Please specify the execution type ('hierarchical', 'decentralized', or 'sequential') as a command-line argument.")

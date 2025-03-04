@@ -89,7 +89,8 @@ class MASGenerativeModel(BaseGenerativeModel):
         memory_order: int = 5,
         extra_context: Optional[dict] = None,
         long_context: bool = True,
-        long_context_order: int = 10
+        long_context_order: int = 10,
+        chat_log: str = None
     ):
         super().__init__(
             model_name=model_name,
@@ -109,6 +110,7 @@ class MASGenerativeModel(BaseGenerativeModel):
             self.llm_long_context = GenerativeModel(model_name=self.model_name,category=self.category,temperature=0.5,memory=False)
             self.context_summaries = []
             self.long_context_order = long_context_order
+            self.chat_log = chat_log
         
     def _update_long_context(self, messages: List[Dict[str, str]]) -> Tuple[List[Document], List[Dict[str, str]]]:
         """
@@ -128,7 +130,9 @@ class MASGenerativeModel(BaseGenerativeModel):
             
             if len(self.context_summaries) > self.long_context_order:
                 self.context_summaries = self.context_summaries[-self.long_context_order:]
-                
+            
+            if self.chat_log:
+                self._save_chat_history(chat_history=messages[:-self.memory_order//2])
             truncated_messages = messages[-self.memory_order//2:]
             return self.context_summaries, truncated_messages
             
@@ -141,7 +145,7 @@ class MASGenerativeModel(BaseGenerativeModel):
         prompt: str, 
         output_structure: Type[BaseModel],
         agent_context: Optional[dict] = None,
-        agent_name: Optional[str] = None,
+        agent_name: Optional[str] = "assistant",
         component_context: list = [],
         **kwargs
     ):
@@ -159,16 +163,16 @@ class MASGenerativeModel(BaseGenerativeModel):
         if self.long_context and len(self.chat_history) > self.memory_order:
             self.context_summaries, truncated_messages = self._update_long_context(self.chat_history)
             self.chat_history=truncated_messages
+
+        role = self._update_role(agent_name,kwargs)
         
-        if 'passed_from' in kwargs:
-            role=kwargs['passed_from']
-        else:
-            role=agent_name
-        if component_context:
-            self.chat_history.extend(component_context)
-            self.chat_history.append({'role': role, 'content': prompt})
-        else:
-            self.chat_history.append({'role': role, 'content': prompt})
+        self._update_component_context(component_context=component_context, role=role, prompt=prompt)
+        
+        if len(self.chat_history)>self.memory_order:
+            self._save_chat_history(self.chat_history[:-self.memory_order])
+            self.chat_history=self.chat_history[-self.memory_order:]
+                
+        # print(self.chat_history)
 
         # Prepare MAS-specific inputs
         mas_inputs = {
@@ -176,7 +180,7 @@ class MASGenerativeModel(BaseGenerativeModel):
             "current_time": datetime.now().strftime("%A, %B %d, %Y, %I:%M %p"),
             "question": prompt,
             "long_context": self.context_summaries,
-            "history": self.chat_history[-self.memory_order:] if len(self.chat_history) > self.memory_order else self.chat_history,
+            "history": self.chat_history,
             "schema": output_structure.model_json_schema(),
             "coworking_agents_info": agent_context if agent_context is not None else "No agents present"
         }
@@ -201,3 +205,54 @@ class MASGenerativeModel(BaseGenerativeModel):
     def get_category(self) -> str:
         """Returns the category of the llm."""
         return self.category
+    
+    def _update_component_context(self, component_context, role, prompt):
+        if component_context:
+            self.chat_history.extend(component_context)
+            self.chat_history.append({'role': role, 'content': prompt})
+        else:
+            self.chat_history.append({'role': role, 'content': prompt})
+    def _update_role(self, agent_name, kwargs):
+        if 'passed_from' in kwargs:
+            if kwargs['passed_from'] is not None:
+                return kwargs['passed_from']
+            else:
+                return agent_name
+        else:
+            return agent_name        
+        
+    
+    def _save_chat_history(self, chat_history):
+            """Saves the chat history to the chat_log file, if provided."""
+            if self.chat_log:
+                try:
+                    import json
+                    file_extension = self.chat_log.split('.')[-1].lower()
+                    
+                    if file_extension == 'json':
+                        try:
+                            with open(self.chat_log, 'r+') as f:
+                                try:
+                                    existing_data = json.load(f)
+                                except json.JSONDecodeError:
+                                    existing_data = []  # Handle empty or invalid JSON file
+                                
+                                if isinstance(existing_data, list):
+                                    combined_data = existing_data + chat_history
+                                else:
+                                    combined_data = [existing_data] + chat_history  # Handle case where existing data is not a list
+                                
+                                f.seek(0)  # Rewind to the beginning of the file
+                                json.dump(combined_data, f, indent=4)
+                                f.truncate()  # Remove any remaining old data
+                        except FileNotFoundError:
+                            # File doesn't exist, create it and save the chat history
+                            with open(self.chat_log, 'w') as f:
+                                json.dump(chat_history, f, indent=4)
+                    else:
+                        with open(self.chat_log, 'a') as f:
+                            f.write(str(chat_history) + '\n')  # Append as string with newline
+                    
+                    print(f"Chat history saved to {self.chat_log}")
+                except Exception as e:
+                    print(f"Error saving chat history: {e}")

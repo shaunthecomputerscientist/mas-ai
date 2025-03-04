@@ -308,7 +308,7 @@ agent_sequence = [
 result = mas_sequential.initiate_sequential_mas(
     query="Investigate recent developments in renewable energy storage",
     agent_sequence=agent_sequence,
-    memory_order=3  # Number of previous messages to retain in context
+    memory_order=3  # Number of previous messages to retain in context across agents.
 )
 ```
 
@@ -356,15 +356,25 @@ supervisor_config = SupervisorConfig(
 # Initialize hierarchical MAS
 mas_hierarchical = MultiAgentSystem(
     agentManager=manager,
-    isVision=False,
     supervisor_config=supervisor_config,
+    heirarchical_mas_result_callback=handle_task_result,
+    agent_return_direct=True
 )
 
 # Process query through hierarchy with asynchronous execution
-result = mas_hierarchical.initiate_hierarchical_mas(
-    "Research quantum computing advancements and summarize for technical audience", 
-    callback=handle_task_result  # Optional callback for completed tasks
-)
+# Main loop for continuous querying
+while True:
+    try:
+        query = input("Enter a query :\n")
+        if query.lower() == 'exit':
+            break
+        result = asyncio.run(mas_hierarchical.initiate_hierarchical_mas(query))
+        
+        token_stream(result['answer'] or 'No answer', delay=0.05, color='blue', token_type='word')
+    except KeyboardInterrupt:
+        print("\nExiting...")
+        break
+
 ```
 
 #### Key Advantages
@@ -385,7 +395,7 @@ Agents collaborate as peers, dynamically delegating tasks based on capabilities:
 
 ```python
 # Initialize decentralized MAS
-mas_decentralized = MultiAgentSystem(agentManager=manager, isVision=False)
+mas_decentralized = MultiAgentSystem(agentManager=manager)
 
 # Process query with dynamic routing
 result = mas_decentralized.initiate_decentralized_mas(
@@ -442,7 +452,7 @@ def my_tool(query: str) -> str:
 
 ## Installation
 
-1. Option 1: Clone the repository
+1. Option 1: Clone the repository (RECOMMENDED FOR THIS)
 
 ```bash
 # Clone repository

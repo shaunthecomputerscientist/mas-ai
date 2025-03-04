@@ -77,9 +77,9 @@ class BaseAgent:
 
         if node == 'planner':
             current_state['plan'] = parse_task_string(parsed_response['answer'])
-            if self.logger:
-                for ele in current_state['plan']:
-                    self.logger.info(ele)
+            # if self.logger:
+            #     for ele in current_state['plan']:
+            #         self.logger.info(ele)
         
         self.node=node
 
