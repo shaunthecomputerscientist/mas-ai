@@ -6,6 +6,7 @@ src/masai/__init__.py
 src/masai/AgentManager/AgentManager.py
 src/masai/AgentManager/__init__.py
 src/masai/Agents/__init__.py
+src/masai/Agents/base_agent.py
 src/masai/Agents/singular_agent.py
 src/masai/GenerativeModel/__init__.py
 src/masai/GenerativeModel/generativeModels.py
@@ -17,6 +18,7 @@ src/masai/OMAN/oman.py
 src/masai/Tools/__init__.py
 src/masai/Tools/PARSERs/json_parser.py
 src/masai/Tools/logging_setup/logger.py
+src/masai/Tools/utilities/cache.py
 src/masai/Tools/utilities/tokenGenerationTool.py
 src/masai/prompts/prompt_templates.py
 src/masai/pydanticModels/AnswerModel.py

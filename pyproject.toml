@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "masai_framework"
-version = "0.1.2"  # Update this to a new version
+version = "0.1.21"  # Update this to a new version
 authors = [{ name = "PILER", email = "mrpolymathematica@gmail.com" }]
 description = "Multi-Agent System Framework for AI Agents built on LangGraph"
 readme = "README.md"
@@ -33,21 +33,11 @@ dependencies = [
     "langsmith",
     "beautifulsoup4",
     "langchain-google-community==2.0.4",
-    "arxiv",
-    "wikipedia",
-    "duckduckgo-search",
     "psycopg2==2.9.10",
     "tokenizers==0.21.0",
     "neo4j",
     "langchain-google-genai==2.0.9",
     "json-repair==0.39.1",
-    "pytz",
-    "PyAutoGUI==0.9.54",
-    "PyGetWindow==0.0.9",
-    "sentence-transformers==3.4.0",
-    "transformers==4.48.1",
-    "spacy==3.8.4",
-    "rank-bm25==0.2.2",
     "tenacity==8.5.0",
     "tiktoken==0.8.0",
     "langchain-experimental",

@@ -1,6 +1,6 @@
 Metadata-Version: 2.2
 Name: masai_framework
-Version: 0.1.2
+Version: 0.1.21
 Summary: Multi-Agent System Framework for AI Agents built on LangGraph
 Author-email: PILER <mrpolymathematica@gmail.com>
 Requires-Python: >=3.9
@@ -16,10 +16,9 @@ Requires-Dist: python-dotenv
 Requires-Dist: huggingface-hub==0.27.0
 Requires-Dist: tqdm
 Requires-Dist: requests
-Requires-Dist: anthropic
-Requires-Dist: openai
-Requires-Dist: ollama==0.4.4
 Requires-Dist: anthropic==0.45.0
+Requires-Dist: openai==1.60.0
+Requires-Dist: ollama==0.4.4
 Requires-Dist: google-generativeai==0.8.4
 Requires-Dist: langchain-groq==0.2.3
 Requires-Dist: langchain-milvus==0.1.8
@@ -30,21 +29,25 @@ Requires-Dist: langchain-text-splitters==0.3.5
 Requires-Dist: langsmith
 Requires-Dist: beautifulsoup4
 Requires-Dist: langchain-google-community==2.0.4
-Requires-Dist: arxiv
-Requires-Dist: wikipedia
-Requires-Dist: duckduckgo-search
-Requires-Dist: psycopg2
+Requires-Dist: psycopg2==2.9.10
 Requires-Dist: tokenizers==0.21.0
 Requires-Dist: neo4j
-Requires-Dist: langchain_neo4j==0.3.0
-Requires-Dist: json-repair==0.39.1
 Requires-Dist: langchain-google-genai==2.0.9
-Requires-Dist: pytz
-Requires-Dist: PyAutoGUI==0.9.54
-Requires-Dist: PyGetWindow==0.0.9
+Requires-Dist: json-repair==0.39.1
+Requires-Dist: tenacity==8.5.0
+Requires-Dist: tiktoken==0.8.0
+Requires-Dist: langchain-experimental
+Requires-Dist: redis>=5.2.1
 Provides-Extra: tools
 
+```diff
+- PLEASE STAR THE PROJECT IF YO LIKE IT, BEFORE CLONING. A LOT OF PEOPLE CLONE WITHOUT STARRING
+```
 # MAS AI: Multi-Agent System Framework
+
+|                                     |
+|:-----------------------------------:|
+|![MAS AI](/MAS/Logo/image.png) |
 
 MAS AI is a powerful framework for building scalable, intelligent multi-agent systems with advanced memory management and flexible collaboration patterns built using langgraph.
 
@@ -57,18 +60,27 @@ MAS AI is a powerful framework for building scalable, intelligent multi-agent sy
 ## Table of Contents
 - [Introduction](#introduction)
 - [Supported LLM Categories](#supported-llm-categories)
-- [Setting up LLM environment variables](#setting-up-llm-environment-variables)
+- [Setting up LLM Environment Variables](#setting-up-llm-environment-variables)
 - [Agent Architecture](#agent-architecture)
+  - [Router, Reflector, Evaluator](#router-reflector-evaluator)
+  - [Planner, Executor, Reflector](#planner-executor-reflector)
 - [Memory System](#memory-system)
-- [Agent Manager](#agent-manager)
+  - [Agent Memory](#agent-memory)
+  - [Component Memory](#component-memory)
+  - [Multi-Agent System Memory](#multi-agent-system-memory)
+- [Agent Manager and Agent Setup Example](#agent-manager-and-agent-setup-example)
 - [Multi-Agent System Workflows](#multi-agent-system-workflows)
+  - [Sequential Workflow](#sequential-workflow)
+  - [Hierarchical Workflow](#hierarchical-workflow)
+  - [Decentralized Workflow](#decentralized-workflow)
 - [Orchestrated Multi-Agent Network (OMAN)](#orchestrated-multi-agent-network-oman)
+- [Creating Your Own Tools](#creating-your-own-tools)
+- [Redis Support for Tools](#redis-support-for-tools)
 - [Installation](#installation)
-- [Usage Examples](#usage-examples)
-- [Code Structure](#code-structure)
 - [Contributing](#contributing)
 - [License](#license)
 - [Why MAS AI?](#why-mas-ai)
+
 
 
 ## Introduction
@@ -104,25 +116,59 @@ Then make a model_config.json file in the root directory and define the model na
 
 - setup model config in `model_config.json`
 
-```json
-    "router": {
-        "model_name": "gemini-2.0-flash-001",
-        "category": "gemini"
+This setup gives your finer control over each component of the agent.
+
+### By default models in 'all' are chosen unless specific agent specification is mentioned. Use this by default. Ensure to provide specifications for each agent if this is not used ###
+
+### Optionally if you want different models for a specific agent then mention the models of the components of that agent. In this example only research agent specification is provided. Other two agents will draw it's specification from "all". ###
+
+```json5
+{
+
+    "all":{
+        "router": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        },
+        "evaluator": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        },
+        "reflector": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        },
+        "planner": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        }
     },
-    "evaluator": {
-        "model_name": "gemini-2.0-flash-001",
-        "category": "gemini"
-    },
-    "reflector": {
-        "model_name": "gemini-2.0-flash-001",
-        "category": "gemini"
-    },
-    "planner": {
-        "model_name": "gemini-2.0-flash-001",
-        "category": "gemini"
+    
+
+    "research_agent":{
+        "router": {
+            "model_name": "gemini-2.0-pro-exp-02-05",
+            "category": "gemini"
+        },
+        "evaluator": {
+            "model_name": "gemini-2.0-flash-lite-001",
+            "category": "gemini"
+        },
+        "reflector": {
+            "model_name": "gemini-2.0-flash-001",
+            "category": "gemini"
+        },
+        "planner": {
+            "model_name": "gemini-2.0-flash-lite-001",
+            "category": "gemini"
+        }
+
     }
+   
+}
 ```
 
+- `This granular config for each component gives a scope to use specialized smaller language models for each component that does specific tasks. And a larger language model for orchestrating all the agents (supervisor).`
 
 ## Agent Architecture
 
@@ -317,7 +363,7 @@ agent_sequence = [
 result = mas_sequential.initiate_sequential_mas(
     query="Investigate recent developments in renewable energy storage",
     agent_sequence=agent_sequence,
-    memory_order=3  # Number of previous messages to retain in context
+    memory_order=3  # Number of previous messages to retain in context across agents.
 )
 ```
 
@@ -365,15 +411,25 @@ supervisor_config = SupervisorConfig(
 # Initialize hierarchical MAS
 mas_hierarchical = MultiAgentSystem(
     agentManager=manager,
-    isVision=False,
     supervisor_config=supervisor_config,
+    heirarchical_mas_result_callback=handle_task_result,
+    agent_return_direct=True
 )
 
 # Process query through hierarchy with asynchronous execution
-result = mas_hierarchical.initiate_hierarchical_mas(
-    "Research quantum computing advancements and summarize for technical audience", 
-    callback=handle_task_result  # Optional callback for completed tasks
-)
+# Main loop for continuous querying
+while True:
+    try:
+        query = input("Enter a query :\n")
+        if query.lower() == 'exit':
+            break
+        result = asyncio.run(mas_hierarchical.initiate_hierarchical_mas(query))
+        
+        token_stream(result['answer'] or 'No answer', delay=0.05, color='blue', token_type='word')
+    except KeyboardInterrupt:
+        print("\nExiting...")
+        break
+
 ```
 
 #### Key Advantages
@@ -394,7 +450,7 @@ Agents collaborate as peers, dynamically delegating tasks based on capabilities:
 
 ```python
 # Initialize decentralized MAS
-mas_decentralized = MultiAgentSystem(agentManager=manager, isVision=False)
+mas_decentralized = MultiAgentSystem(agentManager=manager)
 
 # Process query with dynamic routing
 result = mas_decentralized.initiate_decentralized_mas(
@@ -437,7 +493,7 @@ result = oman.delegate_task("Research AI trends and schedule a meeting")
 
 
 
-## Creating yor own tools
+## Creating Your Own Tools
 
 ```python
 from langchain.tools import tool
@@ -449,9 +505,30 @@ def my_tool(query: str) -> str:
     return "This is a tool output, fed to the ai."
 ```
 
+## REDIS SUPPORT FOR TOOLs
+
+- Helps you store output of frequently used queries so llm can fetch data faster.
+- Install redis cli to monitor key value data.
+- redis python packed is installed from requirements.txt or via pip
+
+```python
+from langchain.tools import tool
+from masai.Tools.utilities.cache import ToolCache
+
+redis_cache = ToolCache(host='localhost', port=6379, db=0)
+
+@tool
+@redis_cache.masai_cache
+def my_tool(query: str) -> str:
+    """This is a tool. Provide Detailed Docmentation for ai in docstring. (PARAMETERS, RETURN, PURPOSE)"""
+    
+    return "This is a tool output, fed to the ai. cache will be return if llm uses same input to the tool as used previously"
+```
+
+
 ## Installation
 
-1. Option 1: Clone the repository
+1. Option 1: Clone the repository (RECOMMENDED FOR THIS)
 
 ```bash
 # Clone repository
@@ -466,7 +543,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-2. Option 2: Install using pip
+2. Option 2: Install using pip (Updates might be delayed)
 
 ```bash
 pip install masai_framework
@@ -482,3 +559,47 @@ We welcome contributions! Please follow these steps:
 5. Create a pull request
 6. Wait for the pull request to be merged
 
+
+## Why MAS AI?
+
+### MAS AI: A Modular and Scalable Multi-Agent Framework
+
+The MAS AI framework is designed to optimize multi-agent collaboration through a structured, modular architecture. Unlike conventional multi-agent systems that often rely on a monolithic LLM for decision-making, MAS AI introduces distinct functional nodes—**Router, Evaluator, Reflector,** and an optional **Planner**—to enhance adaptability, control, and efficiency.
+
+### Core Architectural Strengths
+
+1. **Explicit Node Separation for Optimized Processing**
+   - Unlike general LLM-centric multi-agent frameworks that embed all decision-making within a single model, MAS AI distributes responsibilities across dedicated components:
+     - **Router**: Analyzes input queries and determines the appropriate next step, whether delegating tasks, selecting tools, or directing information flow.
+     - **Evaluator**: Assesses tool outputs or intermediate results, ensuring high-quality responses before passing them forward.
+     - **Reflector**: Synthesizes insights, refines decision-making strategies, and updates internal models for iterative improvement.
+     - **Planner** (optional but essential for complex workflows): Decomposes high-level queries into structured sub-tasks, managing dependencies for deep research.
+   - This modularity enhances precision, as each node specializes in a distinct function rather than overloading a single LLM with multiple roles.
+
+2. **State-Machine Orchestration for Adaptive Workflow**
+   - Unlike frameworks that rely on predefined, linear task sequences, MAS AI leverages a **LangGraph-based state machine**, allowing dynamic transitions between nodes.
+   - Each step is conditionally determined based on satisfaction criteria, ensuring tasks are revisited or refined when necessary, rather than proceeding blindly to completion.
+
+3. **Enhanced Multi-Agent Collaboration**
+   - Many traditional multi-agent models function in a loosely coupled manner, relying on implicit coordination between agents. MAS AI, however, introduces a structured, decentralized approach where:
+     - Agents intelligently delegate tasks based on specialization.
+     - Data flow between agents is optimized through structured evaluation and reflection loops.
+     - Workflows remain adaptable, allowing agents to reconfigure roles based on evolving tasks.
+   - This structured orchestration significantly enhances efficiency in multi-step problem-solving scenarios, reducing redundant processing and improving response accuracy.
+
+4. **Granular Memory Integration for Context Awareness**
+   - MAS AI distinguishes itself by incorporating a nuanced memory system:
+     - **Short-Term Memory**: Retains transient context during immediate interactions.
+     - **Component-Shared Memory**: Allows nodes (Router, Evaluator, Reflector) to exchange insights dynamically.
+     - **Long Short-Term Memory**: Stores cumulative learning for ongoing optimization across sessions.
+   - This layered approach contrasts with simpler memory models that often struggle with contextual retention over extended interactions.
+
+5. **Optimized for Complex Workflows and Deep Research**
+   - While many multi-agent systems provide general automation, MAS AI is particularly well-suited for:
+     - **Research-intensive tasks** requiring deep reasoning, iterative refinement, and synthesis across multiple data sources.
+     - **Multi-step decision processes** where evaluation and reflection must be separate to ensure reliability.
+     - **Tool-augmented execution** where decision nodes dynamically adjust based on external API responses and real-world data.
+   - By explicitly defining each stage of the workflow, MAS AI avoids the common pitfalls of over-reliance on a single LLM’s reasoning loop, leading to more accurate and efficient outputs.
+
+### Conclusion
+MAS AI stands apart from conventional multi-agent frameworks by offering a well-defined, modular architecture. By separating key cognitive functions into specialized nodes and orchestrating workflows through a state-machine model, it ensures superior adaptability, precision, and efficiency. This approach makes MAS AI particularly valuable for applications requiring structured problem-solving, deep research, and scalable multi-agent collaboration.
