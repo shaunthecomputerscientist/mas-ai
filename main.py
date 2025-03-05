@@ -30,7 +30,7 @@ model_config_path = os.path.join(os.getcwd(), 'model_config.json')
 # Define Agent Manager
 manager = AgentManager(
     context={"HUMAN NAME": "SHAUN"},
-    logging=False,
+    logging=True,
     model_config_path=model_config_path,
     chat_log='MAS/WORKSPACE/chat_log.json' # ensure it exixts
 )

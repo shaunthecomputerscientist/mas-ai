@@ -15,18 +15,27 @@ MAS AI is a powerful framework for building scalable, intelligent multi-agent sy
 ## Table of Contents
 - [Introduction](#introduction)
 - [Supported LLM Categories](#supported-llm-categories)
-- [Setting up LLM environment variables](#setting-up-llm-environment-variables)
+- [Setting up LLM Environment Variables](#setting-up-llm-environment-variables)
 - [Agent Architecture](#agent-architecture)
+  - [Router, Reflector, Evaluator](#router-reflector-evaluator)
+  - [Planner, Executor, Reflector](#planner-executor-reflector)
 - [Memory System](#memory-system)
-- [Agent Manager](#agent-manager)
+  - [Agent Memory](#agent-memory)
+  - [Component Memory](#component-memory)
+  - [Multi-Agent System Memory](#multi-agent-system-memory)
+- [Agent Manager and Agent Setup Example](#agent-manager-and-agent-setup-example)
 - [Multi-Agent System Workflows](#multi-agent-system-workflows)
+  - [Sequential Workflow](#sequential-workflow)
+  - [Hierarchical Workflow](#hierarchical-workflow)
+  - [Decentralized Workflow](#decentralized-workflow)
 - [Orchestrated Multi-Agent Network (OMAN)](#orchestrated-multi-agent-network-oman)
+- [Creating Your Own Tools](#creating-your-own-tools)
+- [Redis Support for Tools](#redis-support-for-tools)
 - [Installation](#installation)
-- [Usage Examples](#usage-examples)
-- [Code Structure](#code-structure)
 - [Contributing](#contributing)
 - [License](#license)
 - [Why MAS AI?](#why-mas-ai)
+
 
 
 ## Introduction
@@ -449,6 +458,27 @@ def my_tool(query: str) -> str:
     
     return "This is a tool output, fed to the ai."
 ```
+
+## REDIS SUPPORT FOR TOOLs
+
+- Helps you store output of frequently used queries so llm can fetch data faster.
+- Install redis cli to monitor key value data.
+- redis python packed is installed from requirements.txt or via pip
+
+```python
+from langchain.tools import tool
+from masai.Tools.utilities.cache import ToolCache
+
+redis_cache = ToolCache(host='localhost', port=6379, db=0)
+
+@tool
+@redis_cache.masai_cache
+def my_tool(query: str) -> str:
+    """This is a tool. Provide Detailed Docmentation for ai in docstring. (PARAMETERS, RETURN, PURPOSE)"""
+    
+    return "This is a tool output, fed to the ai. cache will be return if llm uses same input to the tool as used previously"
+```
+
 
 ## Installation
 

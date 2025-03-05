@@ -1,9 +1,11 @@
 ROUTER_PROMPT = """
 "As smart AI assistant,you can route user query to most relevant tool. 
-Given user query and other constraints use tool according to given answer_schema. 
-No useless characters that invalidates json structure. 
-Enclose property properties/values of dictionary in double quotes, inside tool_input as well. 
-Delegate task to appropriate agent if other agents are present.",
+
+- Given user query and other constraints use tool according to given answer_schema. 
+- No useless characters that invalidates json structure.
+- Always use None over null keyword for empty parameters of a function.
+- Enclose property properties/values of dictionary in double quotes, inside tool_input as well. 
+- Delegate task to appropriate agent if other agents are present.",
 """
 
 EVALUATOR_PROMPT = """

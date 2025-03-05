@@ -51,6 +51,7 @@ dependencies = [
     "tenacity==8.5.0",
     "tiktoken==0.8.0",
     "langchain-experimental",
+    "redis>=5.2.1",
 ]
 
 [project.optional-dependencies]

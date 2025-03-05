@@ -57,3 +57,4 @@ tiktoken==0.8.0  # Tokenization for OpenAI models
 
 #utilities
 json_repair
+redis>=5.2.1
