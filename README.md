@@ -7,13 +7,23 @@
 |:-----------------------------------:|
 |![MAS AI](/MAS/Logo/image.png) |
 
-MAS AI is a powerful framework for building scalable, intelligent multi-agent systems with advanced memory management and flexible collaboration patterns built using langgraph.
+## MAS AI is a powerful framework for building scalable, intelligent multi-agent systems with advanced memory management and flexible collaboration patterns built using langgraph.
 
 - Each agent in mas-ai has different components that work together to achieve the goal.
 
 - Combine such agents in Multi-Agent Systems to achieve more complex goals.
 
 - Combine such Multi-Agent Systems in an Orchestrated Multi-Agent Network (OMAN) to achieve even more complex goals.
+
+
+## Featured
+
+- ### [MAS AI was featred by sageflow community as a part of their newsletter. Check them out.](https://sageflow.ai/)
+
+|                                     |
+|:-----------------------------------:|
+| ![SageFlow Shoutout](/MAS/Logo/sageflow_masai.jpg)|
+
 
 ## Table of Contents
 - [Introduction](#introduction)
