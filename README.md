@@ -522,7 +522,7 @@ pip install -r requirements.txt
 # -r creates virtual env, if not name specified creates masai by default.
 
 # run command
-./local_setup.sh -r -e <execution_type> -v <virtual_env file name>
+./local_setup.sh -r -e <execution_type> -v <virtual_env folder name>
 ```
 2. Option 2: Install using pip (Updates might be delayed)
 
