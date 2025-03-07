@@ -494,10 +494,11 @@ def my_tool(query: str) -> str:
 ```
 
 
-## Installation
+## Installation and Setup
 
 1. Option 1: Clone the repository (RECOMMENDED FOR THIS)
 
+### For Windows
 ```bash
 # Clone repository
 git clone <repository-url>
@@ -509,8 +510,20 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
-```
 
+
+```
+### For Linux
+```bash
+#  -r installs from requirements.txt
+
+# -e takes the execution type which is then used to run masai.py
+
+# -r creates virtual env, if not name specified creates masai by default.
+
+# run command
+./local_setup.sh -r -e <execution_type> -v <virtual_env file name>
+```
 2. Option 2: Install using pip (Updates might be delayed)
 
 ```bash
