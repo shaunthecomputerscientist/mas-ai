@@ -22,9 +22,10 @@ class State(TypedDict):
     delegate_to_agent:str
     current_node: str
     previous_node: str
-    plan: List[str]
+    plan: Optional[List[str]]
     passed_from: str
     reflection_counter: int = 0
+    tool_loop_counter: int = 0
 
 
 class Agent(BaseAgent):
@@ -104,7 +105,41 @@ class Agent(BaseAgent):
         elif not state["satisfied"] and state["current_tool"] in [None, "None"]:
             return "reflection"
         return "continue"
+    
+    def _tool_loop_warning_prompt(self, state: State)->str:
+        if state['tool_loop_counter']>3:
+            return "WARNING: YOU ARE STUCK IN A LOOP. ANALYZE CHAT HISTORY AND PREVIOUS OUTPUTS AND THEN TAKE NEXT BEST POSSIBLE STEP.."
+        else:
+            return ""
 
+    def _format_node_prompt(self,state:State, node:str):
+        messages=state['messages']
+        tool_output = state['tool_output']
+        if node=='evaluator':
+            return (
+            f"{self._tool_loop_warning_prompt(state=state)}"
+            f"\n\n<ORIGINAL QUESTION>: {messages[0]['content']}"
+            f"<TOOL OUTPUT>: {tool_output}"
+            f"\n{'<PLAN>: '+str(state['plan']) if state['plan'] else ''}"
+        )
+        
+        elif node=='reflector':
+            return (
+            f"{self._tool_loop_warning_prompt(state=state)}"
+            f"""<CURRENT STAGE>: REFLECTION STAGE {state['reflection_counter']} \n\n 
+            <GOAL>: Reflect/Reason on gathered context, think and arrive at solution.
+            \n\n<TOOL OUTPUT>{state['tool_output']} 
+            \n\n<QUESTION> : {messages[0]['content']}\n\n 
+            {'<PLAN>: '+str(state['plan']) if state['plan'] else ''}"""
+        )
+        
+        elif node=='planner':
+            return (
+                f"{self._tool_loop_warning_prompt(state=state)}"
+                f"""<CURRENT STAGE>: PLANNING STAGE\n\n <GOAL>: Plan tasks logically to accomplish the goal. \n\n<QUESTION> : {messages[0]['content']}"""
+            )
+            
+        
     def router(self, state: State) -> State:
         """Route the query to a tool or delegate."""
         messages = state["messages"]
@@ -118,24 +153,17 @@ class Agent(BaseAgent):
 
     def evaluator(self, state: State) -> State:
         """Evaluate tool output."""
-        messages = state["messages"]
         state['current_node'] = 'evaluator'
-        tool_output = state["tool_output"]
         component_context = (
             self.llm_reflector.chat_history[-self.shared_memory_order:] if state['previous_node'] == 'reflector' else
             self.llm_router.chat_history[-self.shared_memory_order:] if state['previous_node'] == 'router' else
             self.llm_planner.chat_history[-self.shared_memory_order:] if state['previous_node'] == 'planner' else []
         )
-        prompt = (
-            f"\n\n<ORIGINAL QUESTION>: {messages[0]['content']}\n\n <PREVIOUS TOOL>:{state['current_tool']}\n\n<TOOL OUTPUT>: {tool_output}\n\n<PLAN>: {state['plan']}\n\n"
-            if state['previous_node'] == 'planner' else
-            f"\n\n<ORIGINAL QUESTION>: {messages[0]['content']}\n\n <PREVIOUS TOOL>:{state['current_tool']}\n\n<TOOL OUTPUT>: {tool_output}\n\n"
-        )
+        prompt = self._format_node_prompt(state=state,node=state['current_node'])
         return self.node_handler(state, self.llm_evaluator, prompt, component_context=component_context, node='evaluator')
 
     def reflection(self, state: State) -> State:
         """Reflect on progress and generate a final answer."""
-        messages = state["messages"]
         if self.logger:
             self.logger.info("\n\n--------------------Reasoning and Reflecting-----------------------------\n\n")
         state['current_node'] = 'reflector'
@@ -148,11 +176,9 @@ class Agent(BaseAgent):
             self.llm_evaluator.chat_history[-self.shared_memory_order:] if state['previous_node'] == 'evaluator' else
             self.llm_planner.chat_history[-self.shared_memory_order:] if state['previous_node'] == 'planner' else []
         )
-        prompt = (
-            f"""<CURRENT STAGE>: REFLECTION STAGE {state['reflection_counter']} \n\n <GOAL>: Reflect/Reason on gathered context, think and arrive at solution. \n\n<LAST USED TOOL>{state['current_tool']}\n\n<TOOL OUTPUT>{state['tool_output']} \n\n<QUESTION> : {messages[0]['content']}\n\n<PLAN>: {state['plan']}"""
-            if state['previous_node'] == 'planner' else
-            f"""<CURRENT STAGE>: REFLECTION STAGE {state['reflection_counter']} \n\n <GOAL>: Reflect/Reason on gathered context, think and arrive at solution. \n\n<LAST USED TOOL>{state['current_tool']}\n\n<TOOL OUTPUT>{state['tool_output']} \n\n<QUESTION> : {messages[0]['content']}"""
-        )
+        
+        prompt = self._format_node_prompt(state=state,node=state['current_node'])
+
         current_state = self.node_handler(state, self.llm_reflector, prompt, component_context=component_context, node='reflector')
         if self.logger:
             self.logger.info("--------------------Reflection End-----------------------------")
@@ -166,7 +192,7 @@ class Agent(BaseAgent):
             self.llm_evaluator.chat_history[-self.shared_memory_order:] if self.node == 'evaluator' else
             self.llm_reflector.chat_history[-self.shared_memory_order:] if self.node == 'reflector' else []
         )
-        prompt = f"""<CURRENT STAGE>: PLANNING STAGE\n\n <GOAL>: Plan tasks logically to accomplish the goal. \n\n<QUESTION> : {messages[0]['content']}"""
+        prompt = self._format_node_prompt(state=state,node='planner')
         return self.node_handler(state, self.llm_planner, prompt, component_context=component_context, node='planner')
 
     def agentworkflow(self) -> StateGraph:
@@ -214,9 +240,10 @@ class Agent(BaseAgent):
             delegate_to_agent=None,
             current_node='planner' if self.plan else 'router',
             previous_node=None,
-            plan=[],
+            plan=None,
             passed_from=passed_from,
-            reflection_counter=0
+            reflection_counter=0,
+            tool_loop_counter=0
         )
         response = self.app.invoke(initial_state, {"recursion_limit": 100})
 

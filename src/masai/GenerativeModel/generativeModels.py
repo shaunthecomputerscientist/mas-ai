@@ -100,8 +100,8 @@ class MASGenerativeModel(BaseGenerativeModel):
             prompt_template=prompt_template,
             info=extra_context
         )
-        """
-        G
+        """_summary_
+        
         """
         self.category = category
         
@@ -131,10 +131,9 @@ class MASGenerativeModel(BaseGenerativeModel):
             if len(self.context_summaries) > self.long_context_order:
                 self.context_summaries = self.context_summaries[-self.long_context_order:]
             
-            if self.chat_log:
-                self._save_chat_history(chat_history=messages[:-self.memory_order//2])
-            truncated_messages = messages[-self.memory_order//2:]
-            return self.context_summaries, truncated_messages
+            
+            
+            return self.context_summaries
             
         except Exception as e:
             self.logger.error(f"Error in long context summarization: {e}")
@@ -160,18 +159,18 @@ class MASGenerativeModel(BaseGenerativeModel):
             component_context: Additional context messages from previous components
         """
         # Handle context extension
+        
+            
         if self.long_context and len(self.chat_history) > self.memory_order:
-            self.context_summaries, truncated_messages = self._update_long_context(self.chat_history)
-            self.chat_history=truncated_messages
+            self.context_summaries = self._update_long_context(self.chat_history)
+            self._update_chat_history()
+        elif len(self.chat_history)> self.memory_order:
+            self._update_chat_history()
 
         role = self._update_role(agent_name,kwargs)
         
         self._update_component_context(component_context=component_context, role=role, prompt=prompt)
-        
-        if len(self.chat_history)>self.memory_order:
-            self._save_chat_history(self.chat_history[:-self.memory_order])
-            self.chat_history=self.chat_history[-self.memory_order:]
-                
+                        
         # print(self.chat_history)
 
         # Prepare MAS-specific inputs
@@ -184,6 +183,8 @@ class MASGenerativeModel(BaseGenerativeModel):
             "schema": output_structure.model_json_schema(),
             "coworking_agents_info": agent_context if agent_context is not None else "No agents present"
         }
+        
+        print(self.context_summaries)
 
         try:
             # print("\n\n\n\n",self.prompt.format(**mas_inputs),"\n\n")
@@ -192,6 +193,7 @@ class MASGenerativeModel(BaseGenerativeModel):
                 self.prompt.format(**mas_inputs)
             ).model_dump()
             
+            # print(response)
             # Update chat history with structured response
             if isinstance(response, dict) and 'answer' in response:
                 self.chat_history.append({'role': role, 'content': response['answer']})
@@ -205,6 +207,13 @@ class MASGenerativeModel(BaseGenerativeModel):
     def get_category(self) -> str:
         """Returns the category of the llm."""
         return self.category
+    
+    def _update_chat_history(self):
+        if len(self.chat_history) > self.memory_order:
+            if self.chat_log:
+                self._save_chat_history(chat_history=self.chat_history[:-self.memory_order//2])
+            self.chat_history=self.chat_history[-self.memory_order//2:]
+        
     
     def _update_component_context(self, component_context, role, prompt):
         if component_context:
@@ -253,6 +262,6 @@ class MASGenerativeModel(BaseGenerativeModel):
                         with open(self.chat_log, 'a') as f:
                             f.write(str(chat_history) + '\n')  # Append as string with newline
                     
-                    print(f"Chat history saved to {self.chat_log}")
+                    # print(f"Chat history saved to {self.chat_log}")
                 except Exception as e:
                     print(f"Error saving chat history: {e}")

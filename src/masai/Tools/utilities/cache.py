@@ -33,15 +33,3 @@ class ToolCache:
             self.redis.set(key, pickle.dumps(result))
             return result
         return wrapper
-
-# Create an instance of RedisCache with your credentials.
-# redis_cache = MASAIToolCache(host='localhost', port=6379, db=0)
-# Decorate the function with both the caching and the @tool decorators.
-# @redis_cache.func  # Outer decorator: handles caching.
-# @tool            # Inner decorator: registers the function as a LangChain tool.
-# def my_function(x, y):
-#     return x + y
-
-# # Example usage:
-# print(my_function(2, 3))  # Will compute, cache, and print the result (5).
-

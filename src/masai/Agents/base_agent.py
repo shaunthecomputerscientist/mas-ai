@@ -22,6 +22,7 @@ class State(TypedDict):
     previous_node: str
     plan: List[str]
     passed_from: str
+    tool_loop_counter:int = 0
 
 class BaseAgent:
     _logger = None
@@ -68,18 +69,21 @@ class BaseAgent:
 
     def _update_state(self, current_state: State, parsed_response: Dict, node: str) -> State:
         """Update the agent state based on a parsed response."""
-        if parsed_response['tool'] not in ["none", None]:
+        if parsed_response['tool'] not in ["None", None]:
             current_state["current_tool"] = parsed_response['tool']
-            current_state['tool_input'] = self.gettoolinput(parsed_response['tool_input'], current_state['current_tool'])
+            current_tool_input = self.gettoolinput(parsed_response['tool_input'], current_state['current_tool'])
+            if current_tool_input==current_state['tool_input'] and current_tool_input not in ['None',None]: # checks with previous state
+                current_state['tool_loop_counter']+=1
+            else:
+                current_state['tool_loop_counter']=1
+            
+            current_state['tool_input'] =  current_tool_input
             if self.logger:
                 self.logger.warning("-------------------------------------Tool Input---------------------------------\n\n")
                 self.logger.warning(current_state['tool_input'])
 
         if node == 'planner':
             current_state['plan'] = parse_task_string(parsed_response['answer'])
-            # if self.logger:
-            #     for ele in current_state['plan']:
-            #         self.logger.info(ele)
         
         self.node=node
 

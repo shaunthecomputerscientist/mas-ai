@@ -467,10 +467,12 @@ result = oman.delegate_task("Research AI trends and schedule a meeting")
 from langchain.tools import tool
 
 @tool
-def my_tool(query: str) -> str:
+def my_tool(query: str, return_direct=True) -> str:
     """This is a tool. Provide Detailed Docmentation for ai in docstring. (PARAMETERS, RETURN, PURPOSE)"""
     
     return "This is a tool output, fed to the ai."
+
+#set return_direct to True if tool output needs to be returned directly after llm calls the tool. Defaults to Flse.
 ```
 
 ## REDIS SUPPORT FOR TOOLs
@@ -511,6 +513,10 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 
+# run sample script given for testing after defining all environment variables and model_config.json
+python masai.py <execution type>
+
+# current supports three execution types example: decentralized
 
 ```
 ### For Linux

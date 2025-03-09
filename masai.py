@@ -4,15 +4,18 @@
 #---------------------------------AgentManager---------------------------------
 import os
 import sys
+
+
 from src.masai.AgentManager.AgentManager import AgentManager, AgentDetails
 from src.masai.MultiAgents.MultiAgent import MultiAgentSystem, SupervisorConfig
 #---------------------------------Tools---------------------------------
-from src.masai.Tools.tools.baseTools import human_in_loop_input
-from src.masai.Tools.tools.searchTools import search_tool, youtube_transcript
-from src.masai.Tools.tools.InputOutputTools import file_handler_IO, files_checker, save_long_term_details
-from src.masai.Tools.tools.calendarTools import fetch_calendar_events, manage_calendar_event
-from src.masai.Tools.tools.emailTools import email_handler
-from src.masai.Tools.tools.visiontools import Vision_Model
+# define your tools and import
+# from src.masai.Tools.tools.baseTools import human_in_loop_input
+# from src.masai.Tools.tools.searchTools import search_tool, youtube_transcript
+# from src.masai.Tools.tools.InputOutputTools import file_handler_IO, files_checker, save_long_term_details
+# from src.masai.Tools.tools.calendarTools import fetch_calendar_events, manage_calendar_event
+# from src.masai.Tools.tools.emailTools import email_handler
+# from src.masai.Tools.tools.visiontools import Vision_Model
 from src.masai.Tools.utilities.tokenGenerationTool import token_stream,MarkupProcessor
 from dotenv import load_dotenv
 load_dotenv()
@@ -21,7 +24,6 @@ from threading import Thread
 import time
 import concurrent.futures
 import asyncio
-
 
 
 # User provides path to their model config
@@ -36,9 +38,9 @@ manager = AgentManager(
 )
 
 # Define tools
-tools_for_researcher = [human_in_loop_input, youtube_transcript, file_handler_IO, files_checker, search_tool, Vision_Model]
-tools_for_personal = [file_handler_IO, human_in_loop_input, files_checker, save_long_term_details, Vision_Model]
-tools_for_productivity = [file_handler_IO, email_handler, human_in_loop_input, files_checker, fetch_calendar_events, manage_calendar_event]
+tools_for_researcher = []
+tools_for_personal = []
+tools_for_productivity = []
 
 # Define agent details for each agent
 research_agent_details = AgentDetails(
@@ -85,14 +87,15 @@ manager.create_agent(
     agent_name="research_agent",
     tools=tools_for_researcher,
     agent_details=research_agent_details,
-    plan=True
+    plan=True,
+    long_context_order=100
 )
 
 manager.create_agent(
     agent_name="general_personal_agent",
     tools=tools_for_personal,
     agent_details=personal_agent_details,
-    plan=True
+    plan=False
 )
 
 manager.create_agent(

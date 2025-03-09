@@ -57,16 +57,37 @@ case "$EXEC_TYPE" in
         ;;
 esac
 
-# Check if virtual environment directory exists
+
+activate_venv() {
+    if [ -f "$VENV_DIR/bin/activate" ]; then
+        echo "Activating using bin/activate..."
+        . "$VENV_DIR/bin/activate"
+    elif [ -f "$VENV_DIR/Scripts/activate" ]; then
+        echo "Activating using Scripts/activate..."
+        . "$VENV_DIR/Scripts/activate"
+    else
+        echo "Error: No valid activation script found in '$VENV_DIR/bin/activate' or '$VENV_DIR/Scripts/activate'"
+        return 1
+    fi
+}
+
 if [ -d "$VENV_DIR" ]; then
-    echo "Virtual environment '$VENV_DIR' already exists, activating it..."
-    . "$VENV_DIR/bin/activate"
+    echo "Virtual environment '$VENV_DIR' already exists, attempting to activate it..."
+    activate_venv
+    if [ $? -ne 0 ]; then
+        echo "Failed to activate virtual environment '$VENV_DIR'"
+        exit 1
+    fi
 else
     echo "Virtual environment '$VENV_DIR' not found, creating it..."
     python3 -m venv "$VENV_DIR"
     if [ $? -eq 0 ]; then
-        echo "Virtual environment created successfully, activating it..."
-        . "$VENV_DIR/bin/activate"
+        echo "Virtual environment created successfully, attempting to activate it..."
+        activate_venv
+        if [ $? -ne 0 ]; then
+            echo "Failed to activate newly created virtual environment '$VENV_DIR'"
+            exit 1
+        fi
     else
         echo "Failed to create virtual environment '$VENV_DIR'"
         exit 1

@@ -14,3 +14,4 @@ masai/Lib
 masai/Scripts
 masai/share
 masai/pyvenv.cfg
+test.py
