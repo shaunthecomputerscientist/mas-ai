@@ -36,6 +36,8 @@
   - [Agent Memory](#agent-memory)
   - [Component Memory](#component-memory)
   - [Multi-Agent System Memory](#multi-agent-system-memory)
+  - [Extended Memory Store](#extended)
+- [Loop Handling Feature](#loop-handling-feature)
 - [Agent Manager and Agent Setup Example](#agent-manager-and-agent-setup-example)
 - [Multi-Agent System Workflows](#multi-agent-system-workflows)
   - [Sequential Workflow](#sequential-workflow)
@@ -199,6 +201,27 @@ MAS AI implements a sophisticated memory hierarchy, starting from the smallest u
 - **Network Memory:** Spans all MAS instances in an OMAN network
   - Controlled by `network_memory_order` parameter
 
+### Extended Memory Store
+
+- **In Memory Store:** We have provided support for in memory vector store. If long context is on for an agent, we can import in memory store that stores and vectorizes long context summaries.
+
+To use,
+
+```python
+#when installed using pip
+from masai.Memory.InMemoryStore import InMemoryDocStore
+#when cloned
+from src.masai.Memory.InMemoryStore import InMemoryDocStore
+```
+  - Provide this in memory doc store instance inside variable in_memory_store while using AgentManager.create_agent.
+
+  - Use an embedding model, typically all-MiniLM-L6-v2 from sentence transformers is downloaded for use.
+
+  - We also provide support for langchain embedding models. Use your api keys to make those work.
+
+## Loop Handling Feature:
+  - To handle cases where agents may get stuck in loops, mechanisms are in place that makes the agent aware of the situation. This is done by issuing warning messages to the agent when a tool is used multiple times with same input, or when the agent is stuck in reflection loop.
+  - This was found effective against multiple type of looping scenarios, like searching tasks, searching + reasoning tasks, searching + reasoning + long context handling tasks, etc.
 
 ## Agent Manager and Agent Setup Example
 
@@ -265,6 +288,8 @@ manager.create_agent(
     tools=research_tools,
     agent_details=research_details,
     plan=False  # Disable planning for simpler operation
+    # optionally you can tweak the memory parameters.
+    # Also you can enable Long Term In Memory Store using from InMemoryDocStore from masai.Memory module.
 )
 
 manager.create_agent(
@@ -465,6 +490,9 @@ result = oman.delegate_task("Research AI trends and schedule a meeting")
 
 ```python
 from langchain.tools import tool
+# optionally you can also import our tool decorator
+# from masai.Tools.Tool import tool (if via pip)
+# from src.masai.Tools.Tool import tool (if via clone)
 
 @tool
 def my_tool(query: str, return_direct=True) -> str:

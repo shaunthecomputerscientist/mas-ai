@@ -1,16 +1,11 @@
 import os, json
 from typing import List, Tuple, Type, Union, Literal, Dict, Optional
 from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, PromptTemplate, SystemMessagePromptTemplate
-from pydantic import BaseModel, Field
 from ..GenerativeModel.generativeModels import MASGenerativeModel
 from ..Agents.singular_agent import Agent
-from datetime import datetime, timezone
 from ..pydanticModels.AnswerModel import answermodel
 from dataclasses import dataclass
-from pathlib import Path
-from importlib import resources
 from ..prompts.prompt_templates import get_agent_prompts
-
 @dataclass
 class AgentDetails:
     capabilities: List[str]  # e.g., ["reasoning", "coding", "science"]
@@ -59,13 +54,13 @@ class AgentManager:
         """Format prompts into ChatPromptTemplates."""
         input_variables = ['question', 'history', 'schema','current_time','useful_info','coworking_agents_info','long_context']
         template = """
-        INFO:{useful_info} 
-        \n\nTIME:{current_time}, 
-        \nQUESTION: {question},
-        \n\nRESPONSE FORMAT : {schema},
+        INFO:{useful_info},
+        \n\nTIME:{current_time},
         \n\nAVAILABLE AGENTS:{coworking_agents_info},
-        \n\nCHAT HISTORY: {history}
-        \n\nLONG CONTEXT: {long_context}
+        \n\nRESPONSE FORMAT : {schema},
+        \n\nCHAT HISTORY: {history},
+        \n\nEXTENDED CONVERSATION CONTEXT: {long_context},
+        \nQUESTION: {question},
         """
         
         human_message_template = HumanMessagePromptTemplate(
@@ -109,7 +104,7 @@ class AgentManager:
             return data['all']
 
     def create_agent(self, agent_name: str, tools: List[object], agent_details: AgentDetails, 
-                 memory_order: int = 20, long_context: bool = True,long_context_order: int = 10, shared_memory_order: int = 10, 
+                 memory_order: int = 10, long_context: bool = True,long_context_order: int = 20, shared_memory_order: int = 10, 
                  plan: bool = False,temperature=0.2,**kwargs):
         """Create and register a new agent in the AgentManager.
 
@@ -143,6 +138,9 @@ class AgentManager:
                   }
                   ```
                   If a specific LLM's memory order is not provided in the dictionary, the default `memory_order` and `long_context_order` values will be used.
+                
+                - `in_memory_store (InMemoryDocStore) : from masai.Memory.InMemoryStore import InMemoryDocStore and set it while using LTIMS variable.
+                - `top_k (int, optional) : returns top k elements from memory store matching the query`
 
         Raises:
             ValueError: If agent_name already exists.
@@ -167,9 +165,11 @@ class AgentManager:
                     "extra_context": self.context, 
                     "long_context": long_context,
                     "long_context_order":long_context_order,
-                    "chat_log":self.chat_log}
-        
-        
+                    "chat_log":self.chat_log,
+                    }
+        if kwargs.get('in_memory_store'):
+            llm_args["memory_store"] = kwargs['in_memory_store']
+            llm_args['k'] = kwargs.get('top_k')
         
         
         def override_config(component, llm_args, memory_order, long_context_order,temperature, **kwargs):
@@ -235,7 +235,7 @@ class AgentManager:
         capabilities_str = ", ".join(details.capabilities)
         
         prompt_parts = [
-            f"Name: {agent_name}.\n Your capabilities are {capabilities_str}",
+            f"Your Name: {agent_name}.\n Your capabilities are {capabilities_str}",
             f"Response Style: {details.style}."
         ]
         

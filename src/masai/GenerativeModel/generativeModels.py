@@ -1,21 +1,12 @@
-import os
-from langchain_community.llms.huggingface_endpoint import HuggingFaceEndpoint
-from langchain_community.chat_models.huggingface import ChatHuggingFace
-from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
-from langchain_community.chat_models.ollama import ChatOllama
-from langchain_community.chat_models.anthropic import ChatAnthropic
-from langchain_openai.chat_models import ChatOpenAI
-from langchain_groq.chat_models import ChatGroq
 from pydantic import BaseModel
 from typing import Dict, List, Literal, Type, Tuple
 from typing import Optional
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import AIMessage
 from langchain.schema import Document
-from datetime import datetime, timezone
+from datetime import datetime
+from ..Memory.InMemoryStore import InMemoryDocStore
 from ..GenerativeModel.baseGenerativeModel.basegenerativeModel import BaseGenerativeModel
+from ..Tools.logging_setup.logger import setup_logger
 from ..prompts.prompt_templates import SUMMARY_PROMPT
-
 class GenerativeModel(BaseGenerativeModel):
     def __init__(
         self, 
@@ -78,7 +69,6 @@ class GenerativeModel(BaseGenerativeModel):
             print(f'LLM Response Error Occurred: {e}')
             return str(e)
 
-
 class MASGenerativeModel(BaseGenerativeModel):
     def __init__(
         self, 
@@ -88,10 +78,30 @@ class MASGenerativeModel(BaseGenerativeModel):
         prompt_template = None,
         memory_order: int = 5,
         extra_context: Optional[dict] = None,
-        long_context: bool = True,
+        long_context: bool = False,
         long_context_order: int = 10,
-        chat_log: str = None
+        chat_log: str = None,
+        **kwargs
     ):
+        """
+            Initializes an instance of the class with the specified parameters.
+
+            This method sets up the essential attributes for the object, including the model to use, its behavior, memory settings, and optional context features.
+
+            Args:
+                model_name (str): The name or identifier of the model to be utilized.
+                temperature (float): A value that adjusts the randomness of the model's output. Lower values (e.g., close to 0) result in more predictable output, while higher values enhance creativity.
+                category (str): The category of the model.
+                prompt_template (Optional[str], optional): A template for prompt. Defaults to None.
+                memory_order (int, optional): The number of previous interactions or data points to retain in memory. Defaults to 5.
+                extra_context (Optional[dict], optional): Additional context for the model, such as metadata or user-specific details. Defaults to None.
+                long_context (bool, optional): Flag to enable long context handling, allowing the model to process extended contextual information through summary. Defaults to True.
+                long_context_order (int, optional): The size or order of the long context when enabled. Controls how much historical data is considered. Defaults to 10.
+                chat_log (Optional[str], optional): File path to a chat log for loading past chat data as context. Defaults to None.
+            Kwargs:
+                memory_store (InMemoryDocStore) : from masai.Memory.InMemoryStore import InMemoryDocStore and use it.
+                k (int, optional) : returns top k elements from memory store matching the query
+        """
         super().__init__(
             model_name=model_name,
             temperature=temperature,
@@ -100,19 +110,29 @@ class MASGenerativeModel(BaseGenerativeModel):
             prompt_template=prompt_template,
             info=extra_context
         )
-        """_summary_
-        
-        """
+
         self.category = category
+        self.logger=setup_logger()
+        
         
         self.long_context = long_context
         if self.long_context:
             self.llm_long_context = GenerativeModel(model_name=self.model_name,category=self.category,temperature=0.5,memory=False)
-            self.context_summaries = []
+            self.context_summaries: List= []
             self.long_context_order = long_context_order
-            self.chat_log = chat_log
         
-    def _update_long_context(self, messages: List[Dict[str, str]]) -> Tuple[List[Document], List[Dict[str, str]]]:
+        self.LTIMStore : InMemoryDocStore= kwargs.get('memory_store')
+            
+        if self.LTIMStore and self.long_context:
+            if not kwargs['memory_store']:
+                raise ValueError('InMemoryDocStore instance must be Provided.')
+            else:
+                self.LTIMStore = kwargs['memory_store']
+        else:
+            self.LTIMStore=None            
+        self.chat_log = chat_log
+        
+    def _update_long_context(self, messages: List[Dict[str, str]]) -> List:
         """
         Updates the long-term context by summarizing messages.
         
@@ -124,20 +144,32 @@ class MASGenerativeModel(BaseGenerativeModel):
         """
         
         try:
-            summary = self.llm_long_context.generate_response(SUMMARY_PROMPT.format(messages=messages))
+            summary: str= self.llm_long_context.generate_response(SUMMARY_PROMPT.format(messages=messages))
+            if summary is not None:
+                
+                self.context_summaries.append(Document(page_content=summary))
+                # print(self.context_summaries)
             
-            self.context_summaries.append(Document(page_content=summary))
-            
+            # print(len(self.context_summaries),self.long_context_order)
             if len(self.context_summaries) > self.long_context_order:
-                self.context_summaries = self.context_summaries[-self.long_context_order:]
-            
+                if self.LTIMStore:
+                    pass_summary = self.context_summaries[:-self.long_context_order]
+                    self._save_in_memory(pass_summary)
+                
+                # print('reducing context summaries')
+                self.context_summaries: list = self.context_summaries[-self.long_context_order:]
+                # print('size after reduction', len(self.context_summaries))
+                if self.context_summaries is None:
+                   self.context_summaries = []
+                       
             
             
             return self.context_summaries
             
         except Exception as e:
+            
             self.logger.error(f"Error in long context summarization: {e}")
-            return self.context_summaries, messages
+            raise e
 
     def generate_response_mas(
         self, 
@@ -162,30 +194,29 @@ class MASGenerativeModel(BaseGenerativeModel):
         
             
         if self.long_context and len(self.chat_history) > self.memory_order:
-            self.context_summaries = self._update_long_context(self.chat_history)
+            self.context_summaries: list = self._update_long_context(self.chat_history)
             self._update_chat_history()
         elif len(self.chat_history)> self.memory_order:
             self._update_chat_history()
 
         role = self._update_role(agent_name,kwargs)
-        
+        in_memory_store_data : Optional[List]=self._handle_in_memory_store_search(k=kwargs.get('k'), prompt=prompt)
         self._update_component_context(component_context=component_context, role=role, prompt=prompt)
                         
-        # print(self.chat_history)
+        
+        
 
         # Prepare MAS-specific inputs
         mas_inputs = {
             "useful_info": str([self.info.items() if self.info else 'None']),
             "current_time": datetime.now().strftime("%A, %B %d, %Y, %I:%M %p"),
             "question": prompt,
-            "long_context": self.context_summaries,
+            "long_context": self.context_summaries if not in_memory_store_data else in_memory_store_data.extend(self.context_summaries),
             "history": self.chat_history,
             "schema": output_structure.model_json_schema(),
             "coworking_agents_info": agent_context if agent_context is not None else "No agents present"
         }
         
-        print(self.context_summaries)
-
         try:
             # print("\n\n\n\n",self.prompt.format(**mas_inputs),"\n\n")
             # Use the prompt template with MAS-specific inputs
@@ -207,6 +238,7 @@ class MASGenerativeModel(BaseGenerativeModel):
     def get_category(self) -> str:
         """Returns the category of the llm."""
         return self.category
+    
     
     def _update_chat_history(self):
         if len(self.chat_history) > self.memory_order:
@@ -265,3 +297,18 @@ class MASGenerativeModel(BaseGenerativeModel):
                     # print(f"Chat history saved to {self.chat_log}")
                 except Exception as e:
                     print(f"Error saving chat history: {e}")
+                    
+    def _save_in_memory(self, documents: List[Document|str]):
+        self.LTIMStore.add_documents(documents=documents)
+    def _handle_in_memory_store_search(self,k, prompt):
+        if self.LTIMStore:
+            k = k or 1
+            content: list=self.LTIMStore.search(query=prompt, k=k)
+            if len(content)>=1:
+                # print("Found Match", content)
+                return [Document(page_content='\n'.join([data['page_content'] for data in content]))]
+            else:
+                return None
+        else:
+            return None
+        

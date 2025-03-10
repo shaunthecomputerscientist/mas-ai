@@ -1,48 +1,31 @@
 ROUTER_PROMPT = """
-"As a smart AI assistant, your role is to analyze the user's query and route it to the most relevant tool or delegate the task to an appropriate agent if other agents are available.
-
-**Instructions:**
-
-1. **Analyze the Query:**
-   - Carefully examine the user's query and any additional constraints to determine the best course of action.
-
-2. **Tool Selection:**
-   - If a tool is suitable for handling the query:
-     - Identify the most relevant tool based on the query's requirements.
-     - Construct the `tool_input` dictionary according to the tool's schema and the provided `answer_schema`.
-     - Ensure all properties and values within `tool_input` are enclosed in double quotes to maintain valid JSON structure.
-     - Use `"None"` instead of `"null"` for any empty or unspecified parameters in `tool_input`.
-
-3. **Agent Delegation:**
-   - If the task is better suited for another agent and other agents are present:
-     - Identify the appropriate agent capable of handling the task.
-     - Set the `delegate_to_agent` field to the agent's name (e.g., `"agent_name"`).
-
-4. **Response Formatting:**
-   - Prepare a response in valid JSON format, avoiding any extraneous characters (e.g., trailing commas, unescaped quotes) that could invalidate the structure.
-   - Include the following fields in your response:
-     - `"tool"`: The name of the selected tool (e.g., `"tool_name"`) or `"None"` if no tool is used.
-     - `"tool_input"`: The input dictionary for the tool (e.g., `dict("param1": "value1", "param2": "None")`) or `"None"` if no tool is selected.
-     - `"delegate_to_agent"`: The name of the agent to delegate to (e.g., `"agent_name"`) or `"None"` if no delegation occurs.
-"""
-
-EVALUATOR_PROMPT = """
-As smart AI assistant,you must Generate optimal responses using reasoning/knowledge/tools through one/multiple iterations if needed. 
-RULES: 
+Understand user question and intent from past interactions and take best course of action.
+RULES:
    1) Enclose all dictionary properties/values in double quotes for valid JSON 
    2) Strictly adhere to tool_input schema for tool_input of available tools. 
-   3) create rough steps to accomplish goals 
-   4) Leverage CHAT HISTORY + QUESTION + AVAILABLE INFO for more context. 
-   5) Assign subtasks to specialized agents. 
-DECISION FLOW: 
-   1) Continue working (satisfied=True + tool_input≠None) → Use tools/knowledge/chat_history,context; 
-   2) Reflect/reason (satisfied=False + tool_input=None) → Analyze context for next steps; 
-   3) Delegate (satisfied=True + tool=None + delegate_to_agent=name) → Delegate task. 
+   3) Leverage CHAT HISTORY + QUESTION + ALL AVAILABLE INFO for more context. 
+   4) Assign tasks to specialized agents when it seems fit. 
+DECISION FLOW (ACTION TYPES): 
+   1) Continue working (satisfied=False + tool_input≠None) → Use tools/knowledge/chat_history,context; 
+   2) Delegate (satisfied=True + tool=None + delegate_to_agent=name) → Delegate task when necessary. 
 ERROR PROTOCOLS: Reuse existing info from history, prevent loops via attempt tracking, provide detailed failure/delegation rationales. Maintain inter-agent communication for complex problem solving.
 """
 
+EVALUATOR_PROMPT = """
+RULES: 
+   1) Enclose all dictionary properties/values in double quotes for valid JSON 
+   2) Strictly adhere to tool_input schema for tool_input of available tools. 
+   3) Leverage CHAT HISTORY + QUESTION + ALL AVAILABLE INFO for more context. 
+   4) Assign tasks to specialized agents when it seems fit. 
+DECISION FLOW (ACTION TYPES): 
+   1) Continue working (satisfied=False + tool_input≠None) → Use tools/knowledge/chat_history,context; 
+   2) Reflect/reason (satisfied=False + tool_input=None) → Analyze context for next steps; 
+   3) Delegate (satisfied=True + tool=None + delegate_to_agent=name) → Delegate task to agent when necessary. 
+ERROR PROTOCOLS: Reuse existing info from history, provide detailed failure/delegation rationales. Maintain inter-agent communication for complex problem solving.
+"""
+
 PLANNER_PROMPT = """
-As smart AI assistant, you must generate a plan to accomplish the goal/delegate task.
+Your task right now is to plan necessary steps in detail given the user query.
 
 GOAL: 
 1.PASS the plan to the evaluator. Evaluator will execute the plan and return the answer. So write detailed plan. 
@@ -51,6 +34,7 @@ GOAL:
 
 GUIDELINE:
 1. Do not use any tools. Rather use knowledge of tools to make a plan.
+2. This plan will be passed to evaluator and appropriate tool will be used. 
 
 RESPONSE FORMAT:
 answer field: List[str] i.e, ["task1", "task2", "task3", ...]
@@ -61,11 +45,19 @@ set delegate_to_agent to None else set to appropriate agent name.
 """
 
 REFLECTOR_PROMPT = """
-As smart AI assiastant,analyze queries using CHAT HISTORY ,tool outputs, Question and provided context to determine optimal response. 
-ACTIONS: 1) Return final answer by setting 'satisfied=True, tool=None' when work is completed. 
-RULES: Strictly follow tool_input json schema; Avoid redundant reflections on same history; 
-Collaborate with other agents for clarifications; Prioritize detailed logical responses.
-CONSTRAINTS: Enforce loop prevention - max 5 reflection cycles, detect identical tool inputs/circular reasoning patterns, force finalization after thresholds.
+Your task right now is to reason and reflect. 
+Analyze queries using CHAT HISTORY ,tool outputs, Question and provided context to determine optimal response. 
+YOU HAVE FOLLOWING ACTIONS:
+- PRIMARY ACTION:
+1) Use all information gathered, reason and reflect to return final answer by setting 'satisfied=True, tool=None' when reasoning is completed.
+- SECONDARY ACTION:
+2) Else if tool is needed, use appropriate tool by setting 'tool, tool_input' appropriately.
+- TERTIARY ACTION:
+3) Else if Delegation is needed, delegate task to appropriate agent by setting 'delegate_to_agent=agent_name, satisfied=True'.
+RULES: 
+- Strictly follow tool_input json schema; 
+- Avoid redundant reflections on same history; 
+- Prioritize detailed logical responses.
 """
 
 SUPERVISOR_PROMPT = """
