@@ -119,7 +119,11 @@ class MASGenerativeModel(BaseGenerativeModel):
         if self.long_context:
             self.llm_long_context = GenerativeModel(model_name=self.model_name,category=self.category,temperature=0.5,memory=False)
             self.context_summaries: List= []
-            self.long_context_order = long_context_order
+        else:
+            self.llm_long_context, self.context_summaries = None, None
+            
+            
+        self.long_context_order = long_context_order
         
         self.LTIMStore : InMemoryDocStore= kwargs.get('memory_store')
             

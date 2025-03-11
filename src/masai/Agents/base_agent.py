@@ -7,7 +7,7 @@ load_dotenv()
 from ..GenerativeModel.baseGenerativeModel.basegenerativeModel import BaseGenerativeModel
 from ..Tools.logging_setup.logger import setup_logger
 from ..Tools.PARSERs.json_parser import parse_tool_input, parse_task_string
-from langchain.schema import Document
+from pydantic import ValidationError
 
 class State(TypedDict):
     messages: List[Dict[str, str]]
@@ -32,7 +32,7 @@ class BaseAgent:
         self.agent_name = agent_name.lower()
         self.logging = logging
         self.shared_memory_order = shared_memory_order
-        self.retain_messages_order = retain_messages_order
+        self.retain_messages_order = retain_messages_order or 10
         self.app = None  # StateGraph workflow, to be set by subclasses
         self.graph = None
         self.tool_mapping: Dict[str, Any] = {}
@@ -134,7 +134,12 @@ class BaseAgent:
         tool_input = state["tool_input"]
         tool = self.tool_mapping[tool_name]
 
-        result = tool.invoke(input=tool_input)
+        try:
+            result = tool.invoke(input=tool_input)
+        except ValidationError as e:
+            result = f"Validation Error: {str(e)}. Use right tool values."  # Store the exception message in result
+        except Exception as e:
+            result = f"Unexpected Error: {str(e)}"  # Optional: catch broader exceptions
         if self.logger:
             self.logger.warning("-------------------------------------Tool Output---------------------------------\n\n")
             self.logger.warning(result)
