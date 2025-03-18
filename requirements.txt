@@ -43,7 +43,7 @@ beautifulsoup4  # HTML parsing
 # nylas>=6.7.0  # Nylas API for email, calendar, contacts
 
 # Local Models and Inference
-ollama==0.4.4  # Ollama for local model inference
+ollama>=0.4.4  # Ollama for local model inference
 
 # Database and Utilities
 psycopg2-binary  # PostgreSQL driver (optional unless directly used)

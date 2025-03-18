@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "masai_framework"
-version = "0.1.22"  # Update this to a new version
+version = "0.1.23"  # Update this to a new version
 authors = [{ name = "PILER", email = "mrpolymathematica@gmail.com" }]
 description = "Multi-Agent System Framework for AI Agents built on LangGraph"
 readme = "README.md"

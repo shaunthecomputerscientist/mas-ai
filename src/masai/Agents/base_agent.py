@@ -20,7 +20,7 @@ class State(TypedDict):
     delegate_to_agent: str
     current_node: str
     previous_node: str
-    plan: List[str]
+    plan: dict
     passed_from: str
     tool_loop_counter:int = 0
 
@@ -83,7 +83,9 @@ class BaseAgent:
                 self.logger.warning(current_state['tool_input'])
 
         if node == 'planner':
-            current_state['plan'] = parse_task_string(parsed_response['answer'])
+            plans: list = parse_task_string(parsed_response['answer'])
+            for i,plan in enumerate(plans):
+                current_state['plan'][i] = plan
         
         self.node=node
 

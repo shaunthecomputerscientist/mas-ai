@@ -18,7 +18,7 @@ from ..prompts.prompt_templates import get_supervisor_prompt
 import threading
 import asyncio
 from typing import Awaitable
-
+from .TaskManager import TaskManager, AsyncTaskManager
 @dataclass
 class SupervisorConfig:
     model_name: str
@@ -72,6 +72,14 @@ class MultiAgentSystem:
                                             result_callback=heirarchical_mas_result_callback,
                                             logging=self.agentManager.logging, 
                                             return_direct=agent_return_direct)
+            
+            # self.task_manager = AsyncTaskManager(self.agentManager.agents, self.supervisor, 
+            #                           self.supervisorModel, 
+            #                           self.initiate_decentralized_mas,
+            #                           result_callback=heirarchical_mas_result_callback,
+            #                           logging=self.agentManager.logging, 
+            #                           return_direct=agent_return_direct)
+
             self.task_ids = []
 
         else:
@@ -242,217 +250,38 @@ class MultiAgentSystem:
         return agent_output
     
     async def initiate_hierarchical_mas(self, query: str) -> Dict[str, Any]:
-            """Initiate a task and optionally monitor for completion non-blockingly.
-            This function is used to initiate a task and monitor for completion non-blockingly.
-            It is hierarchical because it uses a supervisor to delegate the task to the appropriate agent.
-            Parameters:
-                query (str): The query to be processed
-            Returns:
-                dict: The result of the task. contains key 'answer'.
-            """
-            if not self.task_manager:
-                raise ValueError("TaskManager not configured")
-            
-            result = self.task_manager.initiate_task(query)
-            self.task_ids.append(result["task_id"])
-
-            # If a callback is provided and task is queued, monitor asynchronously
-            if self.task_manager.result_callback and result["status"] == "queued":
-                asyncio.create_task(self._monitor_task(result["task_id"], self.task_manager.result_callback))
-
-            return result
-
-    async def _monitor_task(self, task_id: str, callback: Callable[[Dict], None] | Callable[[Dict], Awaitable[None]]):
-        while task_id in self.task_manager.pending_tasks:
-            await asyncio.sleep(0.5)
-            completed = await self.task_manager.get_completed_tasks()
-            for task in completed:
-                if task["task_id"] == task_id:
-                    if asyncio.iscoroutinefunction(callback):
-                        await callback(task)
-                    else:
-                        callback(task)
-                    return
-
-
-class TaskManager:
-    def __init__(self, agents: Dict[str, Any], supervisor: Any, supervisorModel, decentralized_mas_function,
-                 result_callback=None, logging=False, return_direct:bool=False):
-        self.agents = agents
-        self.supervisor: MASGenerativeModel = supervisor
-        self.supervisorModel = supervisorModel
-        self.decentralized_mas_function = decentralized_mas_function
-        self.task_queue = Queue()
-        self.executor = ThreadPoolExecutor(max_workers=5)
-        self.pending_tasks = {}
-        self.completed_tasks = Queue()
-        self.logger = setup_logger()
-        self.check_interval = 2  # Check interval in seconds
-        self.result_callback = result_callback  # Callback for completed tasks
-        self.logging = logging
-        self.return_direct=return_direct
-
-        # Start periodic check in a background thread
-        self.periodic_check_thread = threading.Thread(target=self._periodic_check, daemon=True)
-        self.periodic_check_thread.start()
-    def initiate_task(self, query: str) -> Dict[str, Any]:
-        """Initiate a task and return immediately with either a result or task ID."""
-        supervisor_prompt = (
-            f"METADATA"
-            f"Current pending tasks: {self.pending_tasks}\n"
-            f"Processing: {self.task_queue}\n"
-            f"\n---------------------------------------------\n"
-            f"QUESTION: {query}\n"
-        )
-        decision = self.supervisor.generate_response_mas(supervisor_prompt, self.supervisorModel, self.agents,passed_from='Supervisor')
-        if str(decision.get("delegate_to_agent")).lower() == "none":
-            # Supervisor provided a direct answer; return it immediately
-            return {"status": "completed", "answer": decision['answer'], "task_id": f"direct_{time.time()}"}
-        else:
-            # Delegate to an agent; process in background and return task ID
-            task_id = f"task_{len(self.pending_tasks) + 1}"
-            self.pending_tasks[task_id if task_id not in self.pending_tasks else f"task_{len(self.pending_tasks) + 5}"] = {
-                "agent": decision["delegate_to_agent"],
-                "status": "queued",
-                "query": query,
-                "agent_input": decision["agent_input"],
-                "supervisor_reasoning": decision["reasoning"],
-                "created_at": time.time()
-            }
-            self.task_queue.put((
-                task_id,
-                decision["delegate_to_agent"],
-                query,
-                decision["agent_input"],
-                decision["reasoning"]
-            ))
-            self._process_queue()
-            return {"status": "queued", "task_id": task_id, "answer": decision['answer']}
-    def _process_queue(self):
-        """Process tasks from the queue using the thread pool."""
-        while not self.task_queue.empty():
-            task_data = self.task_queue.get()
-            task_id = task_data[0]
-            future = self.executor.submit(self._execute_task, *task_data)
-            future.add_done_callback(lambda f, tid=task_id: self._handle_task_completion(f, tid))
-
-    def _execute_task(self, task_id: str, agent_name: str, query: str, agent_input: str, supervisor_reasoning: str) -> Dict[str, Any]:
-        """Execute a task by invoking the appropriate agent."""
-        try:
-            agent = self.agents[agent_name.lower()]
-            agent_output = self.decentralized_mas_function(query=agent_input, set_entry_agent=agent, passed_from="Supervisor")
-            if not self.return_direct:
-                return self._notify_supervisor(
-                    task_id=task_id,
-                    agent_name=agent_name,
-                    agent_output=agent_output,
-                    original_query=query,
-                    supervisor_reasoning=supervisor_reasoning
-                )
-            elif self.return_direct:
-                    return {
-                        "status": "completed",
-                        "answer": agent_output["answer"],
-                        "task_id": task_id
-                    }
-        except Exception as e:
-            if self.logging:
-                self.logger.error(f"Task {task_id} failed: {str(e)}")
-            return {"status": "failed", "error": str(e), "task_id": task_id}
-
-    def _handle_task_completion(self, future, task_id: str):
-        """Handle task completion, updating status and storing results."""
-        try:
-            result = future.result()
-            if result["status"] == "requires_revision":
-                if self.logging:
-                    self.logger.info(f"Re-queueing task {task_id} for revision")
-                self.task_queue.put((
-                    task_id,
-                    result["delegate_to_agent"],
-                    result["original_query"],
-                    result["new_input"],
-                    result["reasoning"]
-                ))
-                self.pending_tasks[task_id]["status"] = "requeued"
-                self._process_queue()
-            else:
-                self.pending_tasks[task_id].update({
-                    "status": "completed",
-                    "completed_at": time.time(),
-                    "result": result.get("answer")
-                })
-                self.completed_tasks.put({"task_id": task_id, "answer": result.get("answer")})
-        except Exception as e:
-            if self.logging:
-                self.logger.error(f"Task completion handling failed: {str(e)}")
-            self.pending_tasks[task_id]["status"] = "failed"
-            self.completed_tasks.put({"task_id": task_id, "result": {"status": "failed", "error": str(e)}})
-        finally:
-            if self.pending_tasks[task_id]["status"] in ["completed", "failed"]:
-                del self.pending_tasks[task_id]
-
-    def _notify_supervisor(self, task_id: str, agent_name: str, agent_output: Dict, original_query: str,
-                          supervisor_reasoning: str) -> Dict[str, Any]:
-        """Notify the supervisor to review the task result."""
-        supervisor_prompt = (
-            f"Current pending tasks: {self.pending_tasks}\n"
-            f"This Task ID: {task_id}\n"
-            f"Agent: {agent_name}\n"
-            f"Original Query: {original_query}\n"
-            f"Agent Steps: {agent_output['messages'][-3:] if agent_output.get('messages') else 'No steps'}\n"
-            f"Agent Answer: {agent_output['answer']}\n"
-        )
+        """Initiate a task and monitor for completion non-blockingly.
+        Returns a dict containing key 'answer'.
+        """
+        if not self.task_manager:
+            raise ValueError("TaskManager not configured")
         
-        decision = self.supervisor.generate_response_mas(
-            prompt=supervisor_prompt,
-            output_structure=self.supervisorModel,
-            agent_context=self.agents,
-            passed_from="Supervisor",
-        )
-        # print(decision)
-        if str(decision.get("delegate_to_agent")).lower() != "none":
-            return {
-                "status": "requires_revision",
-                "delegate_to_agent": decision["delegate_to_agent"],
-                "new_input": decision["agent_input"],
-                "reasoning": decision["reasoning"],
-                "original_query": original_query
-            }
-        return {
-            "status": "completed",
-            "answer": decision["answer"],
-            "task_id": task_id
-        }
+        result = self.task_manager.initiate_task(query)
+        self.task_ids.append(result["task_id"])
 
-    def get_completed_tasks(self) -> list:
-        """Retrieve all completed task results."""
-        results = []
-        while not self.completed_tasks.empty():
-            results.append(self.completed_tasks.get())
-        return results
-    def _cleanup_task(self, task_id: str):
-        """Clean up completed task data."""
-        try:
-            if task_id in self.pending_tasks:
-                del self.pending_tasks[task_id]
-            if self.logging:
-                self.logger.info(f"Cleaned up task {task_id}")
-        except Exception as e:
-            if self.logging:
-                self.logger.error(f"Error cleaning up task {task_id}: {e}")
-            
-    def _periodic_check(self):
-        """Periodically check for completed tasks, invoke callback, and clean up."""
+        # If a callback is provided and the task is queued, start the global async monitor once.
+        # if self.task_manager.result_callback and result["status"] == "queued":
+        #     print('status queued')
+        #     # Start global monitor only if not already running
+        #     if not hasattr(self, '_global_monitor_task') or self._global_monitor_task.done():
+        #         self._global_monitor_task = asyncio.create_task(self._monitor_and_cleanup_tasks())
+
+        return result
+
+    async def _monitor_and_cleanup_tasks(self):
+        """Global async monitor that periodically checks for all completed tasks,
+        invokes callbacks, and cleans them up.
+        """
         while True:
-            time.sleep(self.check_interval)
-            completed_tasks = self.get_completed_tasks()
-            if completed_tasks:
-                for task in completed_tasks:
-                    # Invoke callback if provided
-                    if self.result_callback:
-                        self.result_callback(task)
-                    # Optionally log or print for debugging
-                    if self.logging:
-                        self.logger.info(f"Task {task['task_id']} completed with result: {task['answer']}")
-                    self._cleanup_task(task['task_id'])
+            print('inside monitor task')
+            await asyncio.sleep(self.task_manager.check_interval)
+            # Wrap the synchronous get_completed_tasks in asyncio.to_thread
+            completed_tasks = await self.task_manager.get_completed_tasks()
+            print("Async monitor found completed tasks:", completed_tasks)
+            for task in completed_tasks:
+                if self.task_manager.result_callback:
+                    if asyncio.iscoroutinefunction(self.task_manager.result_callback):
+                        await self.task_manager.result_callback(task)
+                    else:
+                        self.task_manager.result_callback(task)
+                await self.task_manager._cleanup_task(task["task_id"])

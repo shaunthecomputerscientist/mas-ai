@@ -11,10 +11,13 @@ src/masai/Agents/singular_agent.py
 src/masai/GenerativeModel/__init__.py
 src/masai/GenerativeModel/generativeModels.py
 src/masai/GenerativeModel/baseGenerativeModel/basegenerativeModel.py
+src/masai/Memory/InMemoryStore.py
 src/masai/MultiAgents/MultiAgent.py
+src/masai/MultiAgents/TaskManager.py
 src/masai/MultiAgents/__init__.py
 src/masai/OMAN/__init__.py
 src/masai/OMAN/oman.py
+src/masai/Tools/Tool.py
 src/masai/Tools/__init__.py
 src/masai/Tools/PARSERs/json_parser.py
 src/masai/Tools/logging_setup/logger.py

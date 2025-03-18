@@ -22,7 +22,7 @@ class State(TypedDict):
     delegate_to_agent:str
     current_node: str
     previous_node: str
-    plan: Optional[List[str]]
+    plan: Optional[dict]
     passed_from: str
     reflection_counter: int = 0
     tool_loop_counter: int = 0
@@ -240,7 +240,7 @@ class Agent(BaseAgent):
             delegate_to_agent=None,
             current_node='planner' if self.plan else 'router',
             previous_node=None,
-            plan=None,
+            plan={},
             passed_from=passed_from,
             reflection_counter=0,
             tool_loop_counter=0

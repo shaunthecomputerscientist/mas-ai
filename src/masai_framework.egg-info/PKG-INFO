@@ -1,6 +1,6 @@
 Metadata-Version: 2.2
 Name: masai_framework
-Version: 0.1.22
+Version: 0.1.23
 Summary: Multi-Agent System Framework for AI Agents built on LangGraph
 Author-email: PILER <mrpolymathematica@gmail.com>
 Requires-Python: >=3.9
@@ -38,6 +38,7 @@ Requires-Dist: tenacity>=8.5.0
 Requires-Dist: tiktoken>=0.8.0
 Requires-Dist: langchain-experimental
 Requires-Dist: redis>=5.2.1
+Requires-Dist: numpy
 Provides-Extra: tools
 
 ```diff
@@ -78,6 +79,8 @@ Provides-Extra: tools
   - [Agent Memory](#agent-memory)
   - [Component Memory](#component-memory)
   - [Multi-Agent System Memory](#multi-agent-system-memory)
+  - [Extended Memory Store](#extended)
+- [Loop Handling Feature](#loop-handling-feature)
 - [Agent Manager and Agent Setup Example](#agent-manager-and-agent-setup-example)
 - [Multi-Agent System Workflows](#multi-agent-system-workflows)
   - [Sequential Workflow](#sequential-workflow)
@@ -241,6 +244,27 @@ MAS AI implements a sophisticated memory hierarchy, starting from the smallest u
 - **Network Memory:** Spans all MAS instances in an OMAN network
   - Controlled by `network_memory_order` parameter
 
+### Extended Memory Store
+
+- **In Memory Store:** We have provided support for in memory vector store. If long context is on for an agent, we can import in memory store that stores and vectorizes long context summaries.
+
+To use,
+
+```python
+#when installed using pip
+from masai.Memory.InMemoryStore import InMemoryDocStore
+#when cloned
+from src.masai.Memory.InMemoryStore import InMemoryDocStore
+```
+  - Provide this in memory doc store instance inside variable in_memory_store while using AgentManager.create_agent.
+
+  - Use an embedding model, typically all-MiniLM-L6-v2 from sentence transformers is downloaded for use.
+
+  - We also provide support for langchain embedding models. Use your api keys to make those work.
+
+## Loop Handling Feature:
+  - To handle cases where agents may get stuck in loops, mechanisms are in place that makes the agent aware of the situation. This is done by issuing warning messages to the agent when a tool is used multiple times with same input, or when the agent is stuck in reflection loop.
+  - This was found effective against multiple type of looping scenarios, like searching tasks, searching + reasoning tasks, searching + reasoning + long context handling tasks, etc.
 
 ## Agent Manager and Agent Setup Example
 
@@ -307,6 +331,8 @@ manager.create_agent(
     tools=research_tools,
     agent_details=research_details,
     plan=False  # Disable planning for simpler operation
+    # optionally you can tweak the memory parameters.
+    # Also you can enable Long Term In Memory Store using from InMemoryDocStore from masai.Memory module.
 )
 
 manager.create_agent(
@@ -507,12 +533,17 @@ result = oman.delegate_task("Research AI trends and schedule a meeting")
 
 ```python
 from langchain.tools import tool
+# optionally you can also import our tool decorator
+# from masai.Tools.Tool import tool (if via pip)
+# from src.masai.Tools.Tool import tool (if via clone)
 
 @tool
-def my_tool(query: str) -> str:
+def my_tool(query: str, return_direct=True) -> str:
     """This is a tool. Provide Detailed Docmentation for ai in docstring. (PARAMETERS, RETURN, PURPOSE)"""
     
     return "This is a tool output, fed to the ai."
+
+#set return_direct to True if tool output needs to be returned directly after llm calls the tool. Defaults to Flse.
 ```
 
 ## REDIS SUPPORT FOR TOOLs
@@ -536,10 +567,11 @@ def my_tool(query: str) -> str:
 ```
 
 
-## Installation
+## Installation and Setup
 
 1. Option 1: Clone the repository (RECOMMENDED FOR THIS)
 
+### For Windows
 ```bash
 # Clone repository
 git clone <repository-url>
@@ -551,8 +583,24 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
-```
 
+# run sample script given for testing after defining all environment variables and model_config.json
+python masai.py <execution type>
+
+# current supports three execution types example: decentralized
+
+```
+### For Linux
+```bash
+#  -r installs from requirements.txt
+
+# -e takes the execution type which is then used to run masai.py
+
+# -r creates virtual env, if not name specified creates masai by default.
+
+# run command
+./local_setup.sh -r -e <execution_type> -v <virtual_env folder name>
+```
 2. Option 2: Install using pip (Updates might be delayed)
 
 ```bash

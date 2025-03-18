@@ -137,7 +137,8 @@ class AgentManager:
                       "planner_temperature": int, # temperature for planner
                   }
                   ```
-                  If a specific LLM's memory order is not provided in the dictionary, the default `memory_order` and `long_context_order` values will be used.
+                
+                If a specific component's memory order is not provided in the dictionary, the default `memory_order` and `long_context_order` values will be used.
                 
                 - `in_memory_store (InMemoryDocStore) : from masai.Memory.InMemoryStore import InMemoryDocStore and set it while using LTIMS variable.
                 - `top_k (int, optional) : returns top k elements from memory store matching the query`
