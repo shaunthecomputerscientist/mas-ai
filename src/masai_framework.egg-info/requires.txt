@@ -7,6 +7,7 @@ langchain-neo4j>=0.3.0
 python-dotenv
 huggingface-hub>=0.27.0
 tqdm
+sentence-transformers>=3.4.0
 requests
 anthropic>=0.45.0
 openai>=1.60.0
@@ -25,6 +26,7 @@ psycopg2-binary>=2.9.10
 tokenizers>=0.21.0
 neo4j
 langchain-google-genai>=2.0.9
+colorama>=0.4.6
 json-repair>=0.39.1
 tenacity>=8.5.0
 tiktoken>=0.8.0

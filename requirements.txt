@@ -59,3 +59,4 @@ tiktoken  # Tokenization for OpenAI models
 json_repair
 redis>=5.2.1
 numpy
+colorama>=0.4.6

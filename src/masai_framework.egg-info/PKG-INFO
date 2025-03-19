@@ -1,6 +1,6 @@
 Metadata-Version: 2.2
 Name: masai_framework
-Version: 0.1.23
+Version: 0.1.24
 Summary: Multi-Agent System Framework for AI Agents built on LangGraph
 Author-email: PILER <mrpolymathematica@gmail.com>
 Requires-Python: >=3.9
@@ -15,6 +15,7 @@ Requires-Dist: langchain-neo4j>=0.3.0
 Requires-Dist: python-dotenv
 Requires-Dist: huggingface-hub>=0.27.0
 Requires-Dist: tqdm
+Requires-Dist: sentence-transformers>=3.4.0
 Requires-Dist: requests
 Requires-Dist: anthropic>=0.45.0
 Requires-Dist: openai>=1.60.0
@@ -33,6 +34,7 @@ Requires-Dist: psycopg2-binary>=2.9.10
 Requires-Dist: tokenizers>=0.21.0
 Requires-Dist: neo4j
 Requires-Dist: langchain-google-genai>=2.0.9
+Requires-Dist: colorama>=0.4.6
 Requires-Dist: json-repair>=0.39.1
 Requires-Dist: tenacity>=8.5.0
 Requires-Dist: tiktoken>=0.8.0
