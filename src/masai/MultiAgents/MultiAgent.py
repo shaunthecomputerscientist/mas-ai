@@ -18,7 +18,7 @@ from ..prompts.prompt_templates import get_supervisor_prompt
 import threading
 import asyncio
 from typing import Awaitable
-from .TaskManager import TaskManager, AsyncTaskManager
+from .TaskManager import TaskManager
 @dataclass
 class SupervisorConfig:
     model_name: str
@@ -66,20 +66,14 @@ class MultiAgentSystem:
             self.mode = "hierarchical"
             self.supervisorModel=structure_supervisor(self.agentManager.agents)
             self.agentManager._compile_agents()
-            self.task_manager = TaskManager(self.agentManager.agents, self.supervisor, 
+            self.task_manager = TaskManager(self.agentManager.agents, 
+                                            self.agentManager.agent_prompts,
+                                            self.supervisor, 
                                             self.supervisorModel, 
                                             self.initiate_decentralized_mas,
                                             result_callback=heirarchical_mas_result_callback,
-                                            logging=self.agentManager.logging, 
+                                            logging_enabled=self.agentManager.logging, 
                                             return_direct=agent_return_direct)
-            
-            # self.task_manager = AsyncTaskManager(self.agentManager.agents, self.supervisor, 
-            #                           self.supervisorModel, 
-            #                           self.initiate_decentralized_mas,
-            #                           result_callback=heirarchical_mas_result_callback,
-            #                           logging=self.agentManager.logging, 
-            #                           return_direct=agent_return_direct)
-
             self.task_ids = []
 
         else:
@@ -93,7 +87,7 @@ class MultiAgentSystem:
         self.logger = setup_logger()
         
     
-    def _update_state(self,message, agent, input, reasoning):
+    async def _update_state(self,message, agent, input, reasoning):
         if len(self.state['last_agent_answers'])>5:
             self.state['last_agent_answers']=self.state['last_agent_answers'][-4:]
         else:
@@ -133,7 +127,7 @@ class MultiAgentSystem:
     
     
     
-    def initiate_sequential_mas(self, query: str, agent_sequence: List[str], memory_order: int = 3):
+    async def initiate_sequential_mas(self, query: str, agent_sequence: List[str], memory_order: int = 3):
         """
         Execute agents in a sequential order, passing output from one agent to the next.
         
@@ -166,10 +160,10 @@ class MultiAgentSystem:
                     passed_from="user"
                 
                 # Execute current agent
-                agent_output = current_agent.initiate_agent(query=agent_prompt,passed_from=passed_from)
+                agent_output = await current_agent.initiate_agent(query=agent_prompt,passed_from=passed_from)
                 
                 # Update state with current agent's output
-                self._update_state(
+                await self._update_state(
                     message='|'.join(str(output.get('content', output.get('tool_output', ''))) 
                                     for output in agent_output['messages'][-memory_order:]),
                     agent=current_agent.agent_name,
@@ -178,7 +172,7 @@ class MultiAgentSystem:
                 )
                 
                 # Update query for next agent
-                current_query = agent_output['answer']
+                current_query = agent_output.get('answer',"")
                 
                 self.logger.info(f"Agent {agent_name} completed processing")
                 
@@ -190,7 +184,7 @@ class MultiAgentSystem:
         
         return current_query
 
-    def initiate_decentralized_mas(self, query: str, set_entry_agent: Agent,memory_order:int=3, passed_from:str="user"):
+    async def initiate_decentralized_mas(self, query: str, set_entry_agent: Agent,memory_order:int=3, passed_from:str="user"):
         """
         This function is used to initiate the decentralized multi-agent system.
         It is decentralized because control can be passed to any agent at any time.
@@ -210,8 +204,8 @@ class MultiAgentSystem:
             dict: Agent output
         """
         if self.state['last_agent'] in self.agentManager.agents.keys():
-            agent_output = self.agentManager.agents[self.state['last_agent']].initiate_agent(query=query, passed_from=passed_from)
-            self._update_state(
+            agent_output = await self.agentManager.agents[self.state['last_agent']].initiate_agent(query=query, passed_from=passed_from)
+            await self._update_state(
                     message='|'.join(str(output.get('content', output.get('tool_output', ''))) 
                                     for output in agent_output['messages'][-memory_order:]),
                     agent=self.state['last_agent'],
@@ -219,8 +213,8 @@ class MultiAgentSystem:
                     reasoning=agent_output['reasoning']
                 )
         else:
-            agent_output = set_entry_agent.initiate_agent(query=query,passed_from=passed_from)
-            self._update_state(
+            agent_output = await set_entry_agent.initiate_agent(query=query,passed_from=passed_from)
+            await self._update_state(
                         message='|'.join(str(output.get('content', output.get('tool_output', ''))) 
                                         for output in agent_output['messages'][-memory_order:]),
                         agent=set_entry_agent.agent_name,
@@ -238,9 +232,9 @@ class MultiAgentSystem:
                         f"<LAST AGENT ANSWERS>: {self.state['last_agent_answers']}\n\n" #shared memory accross multiple agents
                         f"<ORIGINAL QUESTION>: {query}"
                     )
-            agent_output=next_agent.initiate_agent(query=agent_prompt, passed_from=self.state['last_agent'])
+            agent_output=await next_agent.initiate_agent(query=agent_prompt, passed_from=self.state['last_agent'])
 
-            self._update_state(
+            await self._update_state(
                     message='|'.join(str(output.get('content', output.get('tool_output', ''))) 
                                     for output in agent_output['messages'][-memory_order:]),
                     agent=next_agent.agent_name,
@@ -250,23 +244,33 @@ class MultiAgentSystem:
         return agent_output
     
     async def initiate_hierarchical_mas(self, query: str) -> Dict[str, Any]:
-        """Initiate a task and monitor for completion non-blockingly.
-        Returns a dict containing key 'answer'.
-        """
-        if not self.task_manager:
-            raise ValueError("TaskManager not configured")
-        
-        result = self.task_manager.initiate_task(query)
-        self.task_ids.append(result["task_id"])
+            """Initiate a task using the async TaskManager."""
+            if not self.task_manager:
+                raise ValueError("TaskManager not configured for hierarchical MAS")
 
-        # If a callback is provided and the task is queued, start the global async monitor once.
-        # if self.task_manager.result_callback and result["status"] == "queued":
-        #     print('status queued')
-        #     # Start global monitor only if not already running
-        #     if not hasattr(self, '_global_monitor_task') or self._global_monitor_task.done():
-        #         self._global_monitor_task = asyncio.create_task(self._monitor_and_cleanup_tasks())
+            # ---- Add 'await' here ----
+            result: Dict[str, Any] = await self.task_manager.initiate_task(query)
+            # ---- End Change ----
 
-        return result
+            # Now 'result' should be the dictionary returned by initiate_task
+            try:
+                if "task_id" in result: # Check if task_id exists (it might be a direct failure)
+                    self.task_ids.append(result["task_id"])
+                else:
+                    # Handle cases where initiate_task might return failure without a standard task_id
+                    self.task_manager.logger.warning(f"No 'task_id' found in result from initiate_task: {result}")
+            except Exception as e:
+                # Log potential issues if result isn't as expected, even after await
+                if hasattr(self, 'task_manager') and self.task_manager.logging_enabled:
+                    self.task_manager.logger.error(f"Error processing result after awaiting initiate_task: {e}. Result was: {result}", exc_info=True)
+                # Decide how to handle this - re-raise, return error state?
+                # For now, let's return the potentially problematic result
+                pass # Allow returning the original result even if appending task_id failed
+
+            # Optional: Start global monitor if needed (though TaskManager handles callbacks internally now)
+            # ...
+
+            return result # Return the actual dictionary result
 
     async def _monitor_and_cleanup_tasks(self):
         """Global async monitor that periodically checks for all completed tasks,

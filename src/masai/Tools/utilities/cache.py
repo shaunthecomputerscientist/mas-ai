@@ -4,7 +4,7 @@ import pickle
 from langchain.tools import tool  # Importing the @tool decorator
 
 class ToolCache:
-    def __init__(self, host='localhost', port=6379, db=0, password=None):
+    def __init__(self, host='localhost', port=6379, db=0, password=None, timeout:int = 30):
         # Establish a connection to the Redis server with the given credentials.
         """
             Creates tool cache for MAS Ai tools.
@@ -13,8 +13,10 @@ class ToolCache:
             port (int, optional): Port of redis service. Defaults to 6379.
             db (int, optional): database name. Defaults to 0.
             password (_type_, optional): password of redis service. Defaults to None.
+            timeout (int): timeout in minutes.
         """
         self.redis = redis.Redis(host=host, port=port, db=db, password=password)
+        self.timeout=timeout*60
 
     def masai_cache(self, func):
         """
@@ -30,6 +32,6 @@ class ToolCache:
                 return pickle.loads(cached_result)
             # Otherwise, call the original function and cache its result.
             result = func(*args, **kwargs)
-            self.redis.set(key, pickle.dumps(result))
+            self.redis.set(key, pickle.dumps(result),ex=self.timeout)
             return result
         return wrapper

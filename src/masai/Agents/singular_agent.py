@@ -1,630 +1,445 @@
+import asyncio # Ensure asyncio is imported
 from langgraph.graph import END, StateGraph, START
-from typing import List, Dict, Any, Literal, TypedDict, Tuple, Union, Type, Optional
-from pydantic import BaseModel, Field
-import ast, os
-from dotenv import load_dotenv
-load_dotenv()
-from ..GenerativeModel.generativeModels import MASGenerativeModel,GenerativeModel
+from typing import List, Dict, Any, Literal, TypedDict, Tuple, Union, Type, Optional, Generator, AsyncGenerator, Callable # Ensure all types needed are imported
+from langgraph.graph.state import CompiledStateGraph
+# Import the modified BaseAgent and other dependencies
+from .base_agent import BaseAgent, State # Assuming BaseAgent is in base_agent.py
+from pydantic import BaseModel, Field, ValidationError
+
+from ..GenerativeModel.generativeModels import MASGenerativeModel,GenerativeModel # Keep if needed
 from ..GenerativeModel.baseGenerativeModel.basegenerativeModel import BaseGenerativeModel
-from ..Tools.logging_setup.logger import setup_logger
-from ..Tools.PARSERs.json_parser import parse_tool_input, parse_task_string
-from langchain.schema import Document
-from .base_agent import BaseAgent
+from ..prompts.prompt_templates import TOOL_LOOP_WARNING_PROMPT, EVALUATOR_NODE_PROMPT, REFLECTOR_NODE_PROMPT, PLANNER_NODE_PROMPT, ROUTER_NODE_PROMPT
+from ..Config import config
 
-class State(TypedDict):
-    messages: List[Dict[str, str]]
-    current_tool: str
-    tool_input: str
-    tool_output: str
-    answer: str
-    satisfied: bool
-    reasoning: str
-    delegate_to_agent:str
-    current_node: str
-    previous_node: str
-    plan: Optional[dict]
-    passed_from: str
-    reflection_counter: int = 0
-    tool_loop_counter: int = 0
+class Agent(BaseAgent): # Inherit from the modified BaseAgent
+    def __init__(self, agent_name: str, llm_router: BaseGenerativeModel, llm_evaluator: BaseGenerativeModel,
+                 llm_reflector: BaseGenerativeModel, llm_planner: Optional[BaseGenerativeModel] = None,
+                 tool_mapping: Optional[Dict[str, Any]] = None, # Use Any for Langchain tools, or specific Tool type
+                 AnswerFormat: Optional[Type[BaseModel]] = None,
+                 logging: bool = True, agent_context: Optional[Dict[str, Any]] = None, shared_memory_order: int = 5,
+                 retain_messages_order: int = 30, **kwargs):
 
-
-class Agent(BaseAgent):
-    def __init__(self, agent_name: str, llm_router: BaseGenerativeModel, llm_evaluator: BaseGenerativeModel, 
-                 llm_reflector: BaseGenerativeModel, llm_planner: Optional[BaseGenerativeModel] = None, 
-                 tool_mapping: Optional[Dict[str, Any]] = None, AnswerFormat: Optional[Type[BaseModel]] = None, 
-                 logging: bool = True, agent_context: Optional[Dict[str, Any]] = None, shared_memory_order: int = 5, 
-                 retain_messages_order: int = 30):
-        
-        """Initialize an agent with router-evaluator-reflector architecture and optional planner.
-        
-        The agent uses a state machine workflow to process queries through specialized LLMs:
-        - Router: Determines which tool to use or agent to delegate to
-        - Evaluator: Evaluates tool outputs and determines next steps
-        - Reflector: Reflects on overall progress and generates final answers
-        - Planner (optional): Creates execution plans for complex tasks
-
-        Args:
-            agent_name (str): Name identifier for the agent instance
-            llm_router (BaseGenerativeModel): Language model for routing decisions - determines which tool to use or agent to delegate to
-            llm_evaluator (BaseGenerativeModel): Language model for evaluation - processes tool outputs and determines next steps
-            llm_reflector (BaseGenerativeModel): Language model for reflection - analyzes overall progress and generates final answers
-            llm_planner (BaseGenerativeModel, optional): Language model for planning complex tasks. Defaults to None.
-            tool_mapping (Dict[str, Callable], optional): Mapping of tool names to their function implementations. Defaults to None.
-            AnswerFormat (BaseModel, optional): Pydantic model defining the structure of agent responses. Defaults to None.
-            logging (bool, optional): Enable/disable logging functionality. Defaults to True.
-            agent_context (Dict[str, Any], optional): Additional context information for the agent in multi agent system, providing context about other agents it should interact with. Defaults to None.
-            shared_memory_order (int, optional): Number of previous interactions to maintain in shared memory among individual components of an agent. Defaults to 5.
-            retain_messages_order (int, optional): Number of previous interactions to maintain in agent's system memory.This includes short term memory of all components within the agent. Defaults to 20.
+        """Initialize an async agent with router-evaluator-reflector architecture and optional planner.
+        Inherits async execute_tool from BaseAgent.
         """
-        
-        
         super().__init__(agent_name, logging, shared_memory_order, retain_messages_order)
         self.llm_router = llm_router
         self.llm_evaluator = llm_evaluator
         self.llm_reflector = llm_reflector
         self.llm_planner = llm_planner
-        self.plan = bool(llm_planner)  # Enable Planner workflow if llm_planner is provided
-        self.tool_mapping = tool_mapping or {}
-        self.pydanticmodel = AnswerFormat
-        self.agent_context = agent_context
-        self.app = self.agentworkflow()
-        self.graph = self.app.get_graph()
+        self.plan = bool(llm_planner)
+        self.tool_mapping = tool_mapping or {} # Set tool_mapping for BaseAgent's use
+        self.pydanticmodel = AnswerFormat # Set pydanticmodel for BaseAgent's use
+        self.agent_context = agent_context # Set agent_context for BaseAgent's use
+        self.MAX_TOOL_LOOP = kwargs.get('max_tool_loop', config.max_tool_loops)
 
+        # Compile the workflow using async nodes
+        self.app: CompiledStateGraph = self.agentworkflow()
+
+    # Override set_context from BaseAgent
     def set_context(self, context: Optional[Dict] = None, mode: str = "set"):
-        """Set or update context for all components."""
+        """Set or update context for all LLM components."""
         components = [self.llm_router, self.llm_evaluator, self.llm_reflector, self.llm_planner]
         if context:
             for component in components:
                 if component:
+                    if not hasattr(component, 'info') or component.info is None:
+                         component.info = {} # Initialize if not present
+
                     if mode == 'set':
-                        component.info = context
+                        component.info = context.copy()
                     elif mode == 'update':
+                        # Ensure info exists before updating
+                        if component.info is None: component.info = {}
                         component.info.update(context)
 
-    def node_handler(self, state: State, llm: BaseGenerativeModel, prompt: str, component_context: Optional[List] = None, node: Optional[str] = None) -> State:
-        """Handle node-specific LLM responses and update state."""
-        parsed_response = llm.generate_response_mas(
-            prompt, output_structure=self.pydanticmodel, 
-            agent_context=self.agent_context, agent_name=self.agent_name, 
-            component_context=component_context or [], passed_from=state['passed_from']
-        )
-        if self.logger:
-            self.logger.info(f"{parsed_response['answer']}")
-        if state['passed_from'] is not None:
-            state['passed_from'] = None
-        return self._update_state(state, parsed_response, node or 'default')
+    # Override node_handler from BaseAgent -> Make it async
+    async def node_handler(self, state: State, llm: BaseGenerativeModel, prompt: str, component_context: Optional[List] = None, node: Optional[str] = None) -> State:
+        """Handle node-specific LLM responses and update state asynchronously."""
+        node_name = node or 'default_async_node'
+        if self.logger: self.logger.debug(f"Entering async node_handler for node: {node_name}\n")
 
-    def checkroutingcondition(self, state: State) -> Literal["continue", "end", "reflection"]:
-        """Determine the next step in the workflow."""
+        # Prepare arguments for the threaded call
+        llm_call_args = {
+            "prompt": prompt,
+            "output_structure": self.pydanticmodel,
+            "agent_context": self.agent_context,
+            "agent_name": self.agent_name,
+            "component_context": component_context or [],
+            "passed_from": state.get('passed_from')
+        }
+
+        parsed_response = None
+        try:
+            # Run synchronous LLM call in a separate thread
+            if llm.streaming:
+                parsed_response = await llm.astream_response_mas(**llm_call_args)
+            else:
+                parsed_response = await llm.generate_response_mas(**llm_call_args)
+
+            if self.logger:
+                log_answer = parsed_response.get('answer', 'N/A')
+                self.logger.info(f"Node {node_name} LLM response answer (truncated): {str(log_answer)[:config.truncated_response_length]}...")
+                # Optionally log other parts like reasoning, tool selection
+
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error during LLM call in node {node_name}: {e}", exc_info=True)
+            # Create a default error response matching Pydantic model fields if possible
+            parsed_response = {
+                "answer": f"Error in {node_name}: Failed to get valid response from LLM. Error: {e}",
+                "satisfied": False,
+                "reasoning": f"LLM call failed with error: {e}",
+                "tool": None, # Explicitly set tool to None on error
+                "tool_input": None,
+                "delegate_to_agent": None
+            }
+            # Ensure all keys expected by _update_state / Pydantic model are present
+            if self.pydanticmodel:
+                 # Get required fields or all fields
+                 # model_fields = self.pydanticmodel.model_fields.keys()
+                 schema_props = self.pydanticmodel.model_json_schema().get('properties', {}).keys()
+                 for key in schema_props:
+                     if key not in parsed_response:
+                         parsed_response[key] = None # Assign default
+
+
+        # Reset passed_from after it's been used (or attempted)
+        # if state.get('passed_from') is not None: state['passed_from'] = None # Handled in _update_state? Check BaseAgent _update_state logic. Seems node_handler should clear it.
+        state['passed_from'] = None # Clear it here after LLM call attempt
+
+        # Call BaseAgent's synchronous state update method
+        updated_state = await self._update_state(state, parsed_response, node_name)
+        return updated_state # type: ignore
+
+
+    # --- Synchronous Condition/Helper Methods (Keep from original Agent) ---
+
+    async def checkroutingcondition(self, state: State) -> Literal["continue", "end", "reflection"]:
+        """Determine the next step in the workflow (synchronous). Overrides BaseAgent.check_condition."""
         if self.logger:
             self.logger.info('----------------------------Deciding Node--------------------------------')
-        if state["satisfied"] and state["current_tool"] not in [None, "None"]:
-            return "continue"
-        elif state["satisfied"] and state["current_tool"] in [None, "None"]:
+            self.logger.info(f"Checking routing: satisfied={state.get('satisfied')}, current_tool='{state.get('current_tool')}', reflection_counter={state.get('reflection_counter')}, tool_loop_counter={state.get('tool_loop_counter')}")
+
+        satisfied = state.get("satisfied", False)
+        current_tool = state.get("current_tool", None)
+        reflection_counter = state.get('reflection_counter', 0)
+        MAX_REFLECTIONS = config.MAX_REFLECTION_COUNT # Define max reflections
+
+        # End condition: Satisfied and no tool/delegation needed
+        # Check for tool.return_direct case handled in execute_tool setting satisfied=True & tool=None
+        if satisfied and current_tool in [None, "None", ""]:
+            if self.logger: self.logger.info("Routing decision: end (satisfied, no tool)")
             return "end"
-        elif not state["satisfied"] and state["current_tool"] in [None, "None"]:
+
+        # Continue condition: Tool identified (and not satisfied yet, usually)
+        # If a tool is selected, we generally continue to execute it.
+        if current_tool not in [None, "None", ""]:
+            if self.logger: self.logger.info(f"Routing decision: continue (tool '{current_tool}' identified)")
+            return "continue"
+
+        # Reflection condition: Not satisfied, no tool selected, and within reflection limits
+        if not satisfied and current_tool in [None, "None", ""] and reflection_counter < MAX_REFLECTIONS:
+            if self.logger: self.logger.info(f"Routing decision: reflection (not satisfied, no tool, reflection #{reflection_counter+1})")
             return "reflection"
-        return "continue"
-    
-    def _tool_loop_warning_prompt(self, state: State)->str:
-        if state['tool_loop_counter']>3:
-            return "WARNING: YOU ARE STUCK IN A LOOP. ANALYZE CHAT HISTORY AND PREVIOUS OUTPUTS AND THEN TAKE NEXT BEST POSSIBLE STEP.."
+
+        # Fallback End condition: Reached max reflections or other terminal state without satisfaction/tool
+        if self.logger: self.logger.warning(f"Routing decision: end (fallback/max reflections - satisfied={satisfied}, tool='{current_tool}', reflections={reflection_counter})")
+        # Ensure the final answer reflects the situation (e.g., failure to satisfy)
+        # This might need adjustment in the Reflector node logic.
+        return "end"
+
+
+    async def _tool_loop_warning_prompt(self, state: State) -> str:
+        """Generate warning if stuck in a tool loop (synchronous)."""
+        if state.get('tool_loop_counter', 0) > self.MAX_TOOL_LOOP: # Check counter updated in _update_state
+            return TOOL_LOOP_WARNING_PROMPT
         else:
             return ""
 
-    def _format_node_prompt(self,state:State, node:str):
-        messages=state['messages']
-        tool_output = state['tool_output']
-        if node=='evaluator':
-            return (
-            f"{self._tool_loop_warning_prompt(state=state)}"
-            f"\n\n<ORIGINAL QUESTION>: {messages[0]['content']}"
-            f"<TOOL OUTPUT>: {tool_output}"
-            f"\n{'<PLAN>: '+str(state['plan']) if state['plan'] else ''}"
-        )
-        
-        elif node=='reflector':
-            return (
-            f"{self._tool_loop_warning_prompt(state=state)}"
-            f"""<CURRENT STAGE>: REFLECTION STAGE {state['reflection_counter']} \n\n 
-            <GOAL>: Reflect/Reason on gathered context, think and arrive at solution.
-            \n\n<TOOL OUTPUT>{state['tool_output']} 
-            \n\n<QUESTION> : {messages[0]['content']}\n\n 
-            {'<PLAN>: '+str(state['plan']) if state['plan'] else ''}"""
-        )
-        
-        elif node=='planner':
-            return (
-                f"{self._tool_loop_warning_prompt(state=state)}"
-                f"""<CURRENT STAGE>: PLANNING STAGE\n\n <GOAL>: Plan tasks logically to accomplish the goal. \n\n<QUESTION> : {messages[0]['content']}"""
-            )
-            
-        
-    def router(self, state: State) -> State:
-        """Route the query to a tool or delegate."""
-        messages = state["messages"]
-        state['current_node'] = 'router'
-        component_context = (
-            self.llm_evaluator.chat_history[-self.shared_memory_order:] if self.node == 'evaluator' else
-            self.llm_reflector.chat_history[-self.shared_memory_order:] if self.node == 'reflector' else []
-        )
-        prompt = messages[0]['content'] if messages else ""
-        return self.node_handler(state, self.llm_router, prompt, component_context=component_context, node='router')
+    async def _format_node_prompt(self, state: State, node: str) -> str:
+        """Format the prompt for a specific node (synchronous)."""
+        messages = state.get('messages', [])
+        tool_output = state.get('tool_output', 'N/A') # Default if no tool output yet
+        original_question = messages[0]['content'] if messages else "No original question found."
+        # Safely access plan, format if exists
+        plan_dict = state.get('plan')
+        plan_str = ""
+        if plan_dict and isinstance(plan_dict, dict):
+             plan_items = "\n".join([f"  - Step {k+1}: {v}" for k, v in sorted(plan_dict.items())])
+             plan_str = f"\n<CURRENT PLAN>:\n{plan_items} <\CURRENT PLAN>"
+        # plan_str = f"\n{'<PLAN>: '+str(state['plan']) if state.get('plan') else ''}" # Old format
 
-    def evaluator(self, state: State) -> State:
-        """Evaluate tool output."""
-        state['current_node'] = 'evaluator'
-        component_context = (
-            self.llm_reflector.chat_history[-self.shared_memory_order:] if state['previous_node'] == 'reflector' else
-            self.llm_router.chat_history[-self.shared_memory_order:] if state['previous_node'] == 'router' else
-            self.llm_planner.chat_history[-self.shared_memory_order:] if state['previous_node'] == 'planner' else []
-        )
-        prompt = self._format_node_prompt(state=state,node=state['current_node'])
-        return self.node_handler(state, self.llm_evaluator, prompt, component_context=component_context, node='evaluator')
+        warning = await self._tool_loop_warning_prompt(state=state)
+        reflection_count_display = state.get('reflection_counter', 0) + 1 # For display in prompt
 
-    def reflection(self, state: State) -> State:
-        """Reflect on progress and generate a final answer."""
-        if self.logger:
-            self.logger.info("\n\n--------------------Reasoning and Reflecting-----------------------------\n\n")
-        state['current_node'] = 'reflector'
-        if self.node=='reflector':
-            state['reflection_counter']+=1
+        if node == 'evaluator':
+            return EVALUATOR_NODE_PROMPT.format(
+                    warning=warning,
+                    original_question=original_question,
+                    tool_output=tool_output,
+                    plan_str=plan_str
+                )
+
+        elif node == 'reflector':
+            return REFLECTOR_NODE_PROMPT.format(
+                    warning=warning,
+                    original_question=original_question,
+                    tool_output=tool_output,
+                    plan_str=plan_str,
+                    reflection_count_display=reflection_count_display
+                )
+
+        elif node == 'planner':
+             # Planner prompt needs to ask for the plan AND the first action
+             return PLANNER_NODE_PROMPT.format(
+                    warning=warning,
+                    original_question=original_question
+                )
+
+        elif node == 'router': # Added case for router prompt formatting
+             return ROUTER_NODE_PROMPT.format(
+                    warning=warning,
+                    original_question=original_question,
+                    plan_str=plan_str
+                )
+
+
         else:
-            state['reflection_counter']=1
-        component_context = (
-            self.llm_router.chat_history[-self.shared_memory_order:] if state['previous_node'] == 'router' else
-            self.llm_evaluator.chat_history[-self.shared_memory_order:] if state['previous_node'] == 'evaluator' else
-            self.llm_planner.chat_history[-self.shared_memory_order:] if state['previous_node'] == 'planner' else []
-        )
-        
-        prompt = self._format_node_prompt(state=state,node=state['current_node'])
+             if self.logger: self.logger.warning(f"Prompt formatting not defined for node: {node}")
+             return original_question # Fallback prompt
 
-        current_state = self.node_handler(state, self.llm_reflector, prompt, component_context=component_context, node='reflector')
-        if self.logger:
-            self.logger.info("--------------------Reflection End-----------------------------")
+    # --- Async Node Methods (Overrides BaseAgent placeholders if needed, otherwise new) ---
+
+    async def router(self, state: State) -> State:
+        """Route the query to a tool or delegate asynchronously."""
+        if self.logger: self.logger.info("--- Entering Router Node (Async) ---")
+        prev_node = state.get('previous_node')
+        # Simple context fetching (consider refining based on actual needs)
+        component_context = []
+        if prev_node == 'evaluator' and self.llm_evaluator:
+             component_context = self.llm_evaluator.chat_history[-self.shared_memory_order:]
+        elif prev_node == 'reflector' and self.llm_reflector:
+             component_context = self.llm_reflector.chat_history[-self.shared_memory_order:]
+        else:
+            component_context = state.get('messages', [])[-self.shared_memory_order:]
+        # Add other relevant contexts if needed
+
+        prompt = await self._format_node_prompt(state=state, node='router')
+        return await self.node_handler(state, self.llm_router, prompt, component_context=component_context, node='router')
+
+    async def evaluator(self, state: State) -> State:
+        """Evaluate tool output asynchronously."""
+        if self.logger: self.logger.info("--- Entering Evaluator Node (Async) ---")
+        prev_node = state.get('previous_node')
+        component_context = []
+        # Evaluator often needs context from the node *before* the tool execution
+        # Or from the tool execution itself (passed via state['tool_output'])
+        # Let's primarily use context from router/planner/reflector that *led* to the tool call
+        if prev_node == 'execute_tool':
+             # Find node before execute_tool
+             messages = state.get('messages', [])
+             tool_node_index = -1
+             # Find the last tool message index
+             for i in range(len(messages) - 1, -1, -1):
+                 if messages[i].get("role") == "tool":
+                     tool_node_index = i
+                     break
+             if self.llm_router: component_context = self.llm_router.chat_history[-self.shared_memory_order:]
+             elif self.llm_planner: component_context = self.llm_planner.chat_history[-self.shared_memory_order:]
+
+        elif prev_node == 'reflector' and self.llm_reflector: component_context = self.llm_reflector.chat_history[-self.shared_memory_order:]
+        elif prev_node == 'router' and self.llm_router: component_context = self.llm_router.chat_history[-self.shared_memory_order:]
+        elif prev_node == 'planner' and self.llm_planner: component_context = self.llm_planner.chat_history[-self.shared_memory_order:]
+
+
+        prompt = await self._format_node_prompt(state=state, node='evaluator')
+        return await self.node_handler(state, self.llm_evaluator, prompt, component_context=component_context, node='evaluator')
+
+    async def reflection(self, state: State) -> State:
+        """Reflect on progress and generate a final answer asynchronously."""
+        if self.logger: self.logger.info(f"--- Entering Reflection Node (Async) #{state.get('reflection_counter', 0) + 1} ---")
+
+        # Increment reflection counter - handled by _update_state now? No, _update_state doesn't increment reflection counter. Do it here.
+        state['reflection_counter'] = state.get('reflection_counter', 0) + 1
+
+        prev_node = state.get('previous_node')
+        component_context = []
+        # Gather context from relevant previous steps
+        if prev_node == 'router' and self.llm_router: component_context = self.llm_router.chat_history[-self.shared_memory_order:]
+        elif prev_node == 'evaluator' and self.llm_evaluator: component_context = self.llm_evaluator.chat_history[-self.shared_memory_order:]
+        elif prev_node == 'planner' and self.llm_planner: component_context = self.llm_planner.chat_history[-self.shared_memory_order:]
+        elif prev_node == 'execute_tool': # Reflecting after a tool failed evaluation
+            if self.llm_evaluator: component_context = self.llm_evaluator.chat_history[-self.shared_memory_order:]
+
+
+        prompt = await self._format_node_prompt(state=state, node='reflector')
+        current_state = await self.node_handler(state, self.llm_reflector, prompt, component_context=component_context, node='reflector')
+
+        if self.logger: self.logger.info("--- Exiting Reflection Node (Async) ---")
         return current_state
 
-    def planner(self, state: State) -> State:
-        """Plan tasks for complex queries."""
-        messages = state["messages"]
-        state['current_node'] = 'planner'
-        component_context = (
-            self.llm_evaluator.chat_history[-self.shared_memory_order:] if self.node == 'evaluator' else
-            self.llm_reflector.chat_history[-self.shared_memory_order:] if self.node == 'reflector' else []
-        )
-        prompt = self._format_node_prompt(state=state,node='planner')
-        return self.node_handler(state, self.llm_planner, prompt, component_context=component_context, node='planner')
+    async def planner(self, state: State) -> State:
+        """Plan tasks for complex queries asynchronously."""
+        if self.logger: self.logger.info("--- Entering Planner Node (Async) ---")
+        prev_node = state.get('previous_node')
+        component_context = [] # Planner usually starts fresh or gets context from reflection if replanning
+        if prev_node == 'reflector' and self.llm_reflector:
+             component_context = self.llm_reflector.chat_history[-self.shared_memory_order:]
+
+        prompt = await self._format_node_prompt(state=state, node='planner')
+        if not self.llm_planner:
+             if self.logger: self.logger.error("Planner node reached, but no llm_planner configured.")
+             # Create error response using _update_state structure
+             error_response = {
+                 "answer": "Error: Planning component is not available.",
+                 "satisfied": False,
+                 "reasoning": "Internal configuration error: llm_planner missing.",
+                 "tool": None, "tool_input": None, "delegate_to_agent": None
+                 }
+             return self._update_state(state, error_response, 'planner_error') # type: ignore
+
+        return await self.node_handler(state, self.llm_planner, prompt, component_context=component_context, node='planner')
+
+    # --- Workflow Compilation (Overrides BaseAgent placeholder) ---
 
     def agentworkflow(self) -> StateGraph:
-        """Compile the agent's workflow graph."""
-        workflow = StateGraph(State)
-        nodes = ["execute_tool", "evaluator", "reflection"]
-        if self.plan:
-            nodes.append("planner")
-        else:
-            nodes.append("router")
+        """Compile the agent's workflow graph with async nodes."""
+        workflow = StateGraph(State) # type: ignore
 
-        for node in nodes:
-            workflow.add_node(node, getattr(self, node))
+        # Add async nodes from this class
+        workflow.add_node("evaluator", self.evaluator)
+        workflow.add_node("reflection", self.reflection)
+
+        # Add async execute_tool inherited from BaseAgent
+        workflow.add_node("execute_tool", self.execute_tool) # This is now async def in BaseAgent
 
         if self.plan:
-            workflow.add_edge(START, "planner")
-            workflow.add_edge("planner", "evaluator")
+            workflow.add_node("planner", self.planner)
+            workflow.set_entry_point("planner")
+            # Planner output (via node_handler -> _update_state) should set tool/satisfied
+            # Use checkroutingcondition to decide where to go after planner
+            workflow.add_conditional_edges("planner", self.checkroutingcondition, {
+                "continue": "execute_tool", # Planner decided tool is first step
+                "reflection": "reflection", # Planner decided reflection is needed first
+                "end": END # Planner answered directly (unlikely)
+            })
         else:
-            workflow.add_edge(START, "router")
+            workflow.add_node("router", self.router)
+            workflow.set_entry_point("router")
+            # Router decides first step
             workflow.add_conditional_edges("router", self.checkroutingcondition, {
-                "end": END, "reflection": "reflection", "continue": "execute_tool"
+                "continue": "execute_tool",
+                "reflection": "reflection",
+                "end": END
             })
 
-        for node in ["execute_tool", "evaluator", "reflection"]:
-            workflow.add_conditional_edges(node, self.checkroutingcondition, {
-                "end": END, "continue": "evaluator" if node == "execute_tool" else "execute_tool", "reflection": "reflection"
-            })
+        # --- Edges from intermediate nodes ---
 
-        workflow.set_entry_point("planner" if self.plan else "router")
+        # After executing a tool, always evaluate the result
+        workflow.add_edge("execute_tool", "evaluator")
+
+        # After evaluating, decide next step based on satisfaction and tool needs
+        workflow.add_conditional_edges("evaluator", self.checkroutingcondition, {
+             "continue": "execute_tool", # Evaluation identified another tool needed
+             "reflection": "reflection", # Evaluation suggests reflection is needed
+             "end": END # Evaluation confirmed goal is met
+        })
+
+        # After reflecting, decide next step
+        workflow.add_conditional_edges("reflection", self.checkroutingcondition, {
+             "continue": "execute_tool", # Reflection identified a tool needed
+             "reflection": "reflection", # Needs more reflection (loop guard in checkroutingcondition)
+             "end": END # Reflection concluded answer is ready or cannot proceed
+        })
+
+        # Compile the graph
         return workflow.compile()
 
-    def initiate_agent(self, query: str, passed_from: Optional[str] = None) -> Dict:
-        """Initiate the agent workflow with a query."""
-        new_query = self._sanitize_query(query)
-        if self.logger:
-            self.logger.debug(self.agent_name)
+
+
+    async def initiate_agent(self, query: str, passed_from: Optional[str] = None, previous_node: Optional[str]= None) -> Dict:
+        """
+        Initiate the agent asynchronously and return the final result.
+        
+        Args:
+            query: The user query to process
+            passed_from: Optional identifier of the component that passed the query
+            
+        Returns:
+            Dict: The final state containing the agent's response
+        """
+        if not self.app:
+            raise ValueError("Agent workflow not compiled. Cannot initiate.")
+        if self.logger: self.logger.debug(f"Agent: {self.agent_name}")
+        
+        new_query = await self._sanitize_query(query)
+        
+        # Create initial state
         initial_state = State(
             messages=[{"role": "user", "content": new_query}],
-            current_tool="",
-            tool_input="",
-            tool_output="",
-            answer="",
-            satisfied=False,
-            reasoning="",
-            delegate_to_agent=None,
+            current_tool="", tool_input=None, tool_output="", answer="",
+            satisfied=False, reasoning="", delegate_to_agent=None,
             current_node='planner' if self.plan else 'router',
-            previous_node=None,
-            plan={},
-            passed_from=passed_from,
-            reflection_counter=0,
-            tool_loop_counter=0
+            previous_node=previous_node, plan={}, passed_from=passed_from,
+            reflection_counter=0, tool_loop_counter=0
         )
-        response = self.app.invoke(initial_state, {"recursion_limit": 100})
-
-        return response
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    # class Agent:
-#     """Agent Made Out of Routing-Evaluator-Reflector Architecture"""
-#     _logger=None
-#     def __init__(self,agent_name,llm_router, llm_evaluator, llm_reflector, llm_planner=None, tool_mapping=None, AnswerFormat:BaseModel=None,logging=True, agent_context=None, shared_memory_order:int=5):
-        # """Initialize an agent with router-evaluator-reflector architecture and optional planner.
+        configuration = {"recursion_limit": config.MAX_RECURSION_LIMIT}
         
-        # The agent uses a state machine workflow to process queries through specialized LLMs:
-        # - Router: Determines which tool to use or agent to delegate to
-        # - Evaluator: Evaluates tool outputs and determines next steps
-        # - Reflector: Reflects on overall progress and generates final answers
-        # - Planner (optional): Creates execution plans for complex tasks
-
-        # Args:
-        #     agent_name (str): Name identifier for the agent instance
-        #     llm_router (BaseGenerativeModel): Language model for routing decisions - determines which tool to use or agent to delegate to
-        #     llm_evaluator (BaseGenerativeModel): Language model for evaluation - processes tool outputs and determines next steps
-        #     llm_reflector (BaseGenerativeModel): Language model for reflection - analyzes overall progress and generates final answers
-        #     llm_planner (BaseGenerativeModel, optional): Language model for planning complex tasks. Defaults to None.
-        #     tool_mapping (Dict[str, Callable], optional): Mapping of tool names to their function implementations. Defaults to None.
-        #     AnswerFormat (BaseModel, optional): Pydantic model defining the structure of agent responses. Defaults to None.
-        #     logging (bool, optional): Enable/disable logging functionality. Defaults to True.
-        #     agent_context (Dict[str, Any], optional): Additional context information for the agent in multi agent system, providing context about other agents it should interact with. Defaults to None.
-        #     shared_memory_order (int, optional): Number of previous interactions to maintain in shared memory among individual components of an agent. Defaults to 5.
-        #     retain_messages_order (int, optional): Number of previous interactions to maintain in agent's system memory.This includes short term memory of all components within the agent. Defaults to 20.
-        # """
-#         self.agent_name = agent_name
-#         self.llm_evaluator :BaseGenerativeModel =llm_evaluator
-#         self.llm_router : BaseGenerativeModel=llm_router
-#         self.llm_reflector : BaseGenerativeModel=llm_reflector
-#         if llm_planner:
-#             self.llm_planner = llm_planner
-#             self.plan=True
-#         else:
-#             self.llm_planner = None
-#             self.plan=False
-#         self.app = self.agentworkflow()
-#         self.graph = self.app.get_graph()
-#         self.tool_mapping : dict= tool_mapping
-#         self.pydanticmodel : BaseModel = AnswerFormat
-#         self.logging = logging
-#         self.shared_memory_order=shared_memory_order
-
-#         if self.logging:
-#             if Agent._logger is None:
-#                 Agent._logger = setup_logger()
-#             self.logger = Agent._logger
-#         else:
-#             self.logger = None
-
-
-#         self.agent_context = agent_context
-#         self.node:str='evaluator'
-#         self.retain_messages_order=20
-
-
-#     def set_context(self,context:Optional[Dict]=None,mode="set"):
-#         """Set Context Either to override existing context passed to Agent Manager or Define new Context for all components.
-#         Two modes: update or set.
-#         """
-#         components = [self.llm_evaluator,self.llm_reflector, self.llm_router,self.llm_planner]
-#         try:
-#             if context:
-#                 for component in components:
-#                     if component is not None:
-#                         if mode=='set':
-#                             component.info=context
-#                         elif mode=='update':
-#                             component.info.update(context)
-#         except Exception as e:
-#             raise e
+        try:
+            # Execute fully and return the final state
+            final_state = await self.app.ainvoke(initial_state, config=configuration)
+            # Return the final state dictionary directly
+            return dict(final_state)  # Ensure it's a plain dict
         
-                        
-                    
+        except Exception as e:
+            if self.logger: self.logger.error(f"Error during agent invocation: {e}", exc_info=True)
+            error_state = initial_state.copy()  # Start with initial state
+            error_state.update({
+                "answer": f"Agent execution failed with error: {e}",
+                "satisfied": False,
+                "reasoning": f"Error during ainvoke: {e}",
+                "current_node": "error",
+                "tool_output": f"Error: {e}"  # Add error to tool_output maybe
+            })
+            return dict(error_state)  # Return as dict
+
+
+    async def initiate_agent_astream(self, query: str, passed_from: Optional[str] = None, previous_node: Optional[str]= None) -> AsyncGenerator[Dict, None]:
+        """
+        Initiate the agent asynchronously with streaming updates.
         
-#     def gettoolinput(self, tool_input : dict, tool_name: str)->Union[Dict,str]:
-#         tool_input = parse_tool_input(tool_input, list((self.tool_mapping[tool_name]).args_schema.schema()['properties'].keys()))
-#         return tool_input
-
-#     def display(self):
-#         """Display the graph of the agent"""
-#         png_data = self.graph.draw_mermaid_png()
-#         # Save the PNG image to a file
-#         mermaid_dir = os.path.join('MAS','Database','mermaid')
-#         os.makedirs(mermaid_dir, exist_ok=True)
-#         png_file_path = os.path.join(mermaid_dir, "diagram.png")
-#         with open(png_file_path, "wb") as f:
-#             f.write(png_data)
-
-#     def _update_state(self,current_state:State, parsed_response,node):
-#         if not (parsed_response['tool']=="none" or parsed_response['tool']==None):
-#             current_state["current_tool"] = parsed_response['tool']
-#             current_state['tool_input'] = self.gettoolinput(parsed_response['tool_input'],current_state['current_tool'])
-#             if self.logger:
-#                 self.logger.warning("-------------------------------------Tool Input---------------------------------\n\n")
-#                 self.logger.warning(current_state['tool_input'])
-
-        
-#         if node=='planner':
-#             current_state['plan']=parse_task_string(parsed_response['answer'])
-#             for ele in current_state['plan']:
-#                 print(ele)
-#         self.node=node
-#         current_state.update({
-#             "previous_node": node,
-#             "current_node": node,
-#             "answer": parsed_response['answer'],
-#             "satisfied": parsed_response['satisfied'],
-#             "reasoning": parsed_response['reasoning'],
-#             "current_tool": parsed_response['tool'],
-#             "delegate_to_agent": parsed_response['delegate_to_agent']
-#         })
-
-#         current_state["messages"].append({"role": "assistant", "content": current_state['answer']})
-#         if len(current_state["messages"])>self.retain_messages_order:
-#             current_state['messages']=[current_state['messages'][0]].extend(current_state["messages"][-self.retain_messages_order:])
-#         return current_state
-
-#     def node_handler(self,state: State, llm : MASGenerativeModel, prompt:str, component_context=None, node=None):
-        
-#             parsed_response = llm.generate_response_mas(prompt,
-#                             output_structure=self.pydanticmodel, 
-#                             agent_context=self.agent_context if self.agent_context else None, 
-#                             agent_name=self.agent_name,
-#                             component_context=component_context if component_context else [],
-#                             passed_from=state['passed_from'])
-#             if self.logger:
-#                 self.logger.info(f"{parsed_response['answer']}")
-#             if state['passed_from'] is not None:
-#                 state['passed_from']=None
-#             current_state = state
-#             current_state = self._update_state(current_state, parsed_response,node)
-#             return current_state
-
-#     def checkroutingcondition(self,state):
-#         if self.logger:
-#             self.logger.info('----------------------------Deciding Node--------------------------------')
-#         if state["satisfied"] and not(state["current_tool"]==None or state["current_tool"]== "None"):
-#             return "continue" #continue when satisfied is true but tool is provided
-        
-#         elif state["satisfied"] and (state["current_tool"]==None or state["current_tool"] == "None"):
-
-#             return "end" #end when satisfied and tool is none
-        
-#         elif not state["satisfied"] and (state["current_tool"]==None or state["current_tool"]== "None"):
-#             return "reflection" #reflect when not satisfied and tool is not provided
-#         elif state["current_tool"]==None or state["current_tool"]== "None":
-#             return "end" #end when no tool is chosen
-        
-#         return "continue"
-
-
-#     def router(self,state: State) -> State:
-#         messages = state["messages"]
-#         state['current_node']='router'
-#         if self.node=='evaluator':
-#             component_context = self.llm_evaluator.chat_history[-self.shared_memory_order:]
-#         elif self.node=='reflector':
-#             component_context = self.llm_reflector.chat_history[-self.shared_memory_order:]
-#         elif self.node=='router':
-#             component_context=[]
-#         prompt = messages[0]['content'] if messages else ""
-#         current_state = self.node_handler(state, self.llm_router, prompt,component_context=component_context,node='router')
-#         return current_state
-
-#     def execute_tool(self,state: State) -> State:
-#         tool_name = state["current_tool"]
-#         tool_input = state["tool_input"]
-#         tool=self.tool_mapping[tool_name]
-
-#         result = tool.invoke(input=tool_input)
-       
-#         if self.logger:
-#             self.logger.warning("-------------------------------------Tool Output---------------------------------\n\n")
-#             self.logger.warning(result)
-
-
-#         if tool.return_direct:
-#             state["tool_input"] = 'None'
-#             state["messages"].append({"role": f"Tool: {tool_name}", "content": str(result)})
-#             state['current_tool'] = 'None'
-#             state['answer']= str(result)
-#             state['reasoning'] = ""
-#             state['satisfied'] = True
-#             state['delegate_to_agent']=None
-#             self.logger.info("RETURNING DIRECT")
-#             return state
-
-#         state['tool_output'] = str(result)
-#         state['passed_from']=tool_name
-#         state["messages"].append({"role": f"Tool: {tool_name}", "tool_output": state['tool_output']})
-#         return state
-
-#     # Define the evaluation function
-#     def evaluator(self,state: State) -> Dict[str, Any]:
-#         messages = state["messages"]
-#         state['current_node'] = 'evaluator'
-#         tool_output = state["tool_output"]
-#         if state['previous_node']=='reflector':
-#             component_context=self.llm_reflector.chat_history[-self.shared_memory_order:]
-#         elif state['previous_node']=='router':
-#             component_context=self.llm_router.chat_history[-self.shared_memory_order:]
-#         elif state['previous_node']=='planner':
-#             component_context=self.llm_planner.chat_history[-self.shared_memory_order:]
-#         else:
-#             component_context=[]
+        Args:
+            query: The user query to process
+            passed_from: Optional identifier of the component that passed the query
             
-#         if state['previous_node']=='planner':
-#             prompt = f"\n\n<ORIGINAL QUESTION>: {messages[0]['content']}\n\n <PREVIOUS TOOL>:{state['current_tool']}\n\n<TOOL OUTPUT>: {tool_output}\n\n<PLAN>: {state['plan']}\n\n"
-#         else:
-#             prompt = f"\n\n<ORIGINAL QUESTION>: {messages[0]['content']}\n\n <PREVIOUS TOOL>:{state['current_tool']}\n\n<TOOL OUTPUT>: {tool_output}\n\n"
-#         current_state = self.node_handler(state,self.llm_evaluator,prompt,component_context=component_context,node='evaluator')
-
-#         return current_state
-
-#     def reflection(self, state: State):
-#         messages = state["messages"]
-#         if self.logger:
-#             self.logger.info("\n\n--------------------Reasoning and Reflecting-----------------------------\n\n")
-#         state['current_node'] = 'reflector'
-#         if state['previous_node']=='router':
-#             component_context=self.llm_router.chat_history[-self.shared_memory_order:]
-#         elif state['previous_node']=='evaluator':
-#             component_context=self.llm_evaluator.chat_history[-self.shared_memory_order:]
-#         elif state['previous_node']=='planner':
-#             component_context=self.llm_planner.chat_history[-self.shared_memory_order:]
-#         else:
-#             component_context=[]
-#         if state['previous_node']=='planner':
-#             prompt = f"""<CURRENT STAGE>: REFLECTION STAGE\n\n <GOAL>: Reflect/Reason on gathered component_context, think and arrive at solution. \n\n<LAST USED TOOL>{state['current_tool']}\n\n<TOOL OUTPUT>{state['tool_output']} \n\n<QUESTION> : {messages[0]['content']}\n\n<PLAN>: {state['plan']}"""
-#         else:
-#             prompt = f"""<CURRENT STAGE>: REFLECTION STAGE\n\n <GOAL>: Reflect/Reason on gathered component_context, think and arrive at solution. \n\n<LAST USED TOOL>{state['current_tool']}\n\n<TOOL OUTPUT>{state['tool_output']} \n\n<QUESTION> : {messages[0]['content']}"""
-#         current_state = self.node_handler(state, self.llm_reflector,prompt,component_context=component_context,node='reflector')
-#         if self.logger:
-#             self.logger.info("--------------------Reflection End-----------------------------")
-#         return current_state
-    
-#     def planner(self,state: State):
-#         messages = state["messages"]
-#         state['current_node'] = 'planner'
-#         if self.node=='evaluator':
-#             component_context=self.llm_evaluator.chat_history[-self.shared_memory_order:]
-#         elif self.node=='reflection':
-#             component_context=self.llm_reflector.chat_history[-self.shared_memory_order:]
-#         else:
-#             component_context=[]
-#         prompt = f"""<CURRENT STAGE>: PLANNING STAGE\n\n <GOAL>: Plan tasks logically to accomplish the goal. \n\n<QUESTION> : {messages[0]['content']}"""
-#         current_state = self.node_handler(state, self.llm_planner,prompt,component_context=component_context,node='planner')
-#         return current_state
-
-#     def agentworkflow(self):
-#         workflow = StateGraph(State)
-#         nodes = ["execute_tool", "evaluator", "reflection"]
-#         if self.plan:
-#             nodes.append("planner")
-#         else:
-#             nodes.append("router")
-
-#         for node in nodes:
-#             workflow.add_node(node, getattr(self, node))
-
-#         # Dynamic edges
-#         if self.plan:
-#             workflow.add_edge(START, "planner")
-#             workflow.add_edge("planner", "evaluator")
-#         else:
-#             workflow.add_edge(START, "router")
-#             workflow.add_conditional_edges("router", self.checkroutingcondition, {
-#                 "end": END, "reflection": "reflection", "continue": "execute_tool"
-#             })
-
-#         for node in ["execute_tool", "evaluator", "reflection"]:
-#             workflow.add_conditional_edges(node, self.checkroutingcondition, {
-#                 "end": END, "continue": "evaluator" if node == "execute_tool" else "execute_tool", "reflection": "reflection"
-#             })
-
-#         workflow.set_entry_point("planner" if self.plan else "router")
-#         return workflow.compile()
-#     def _sanitize_query(self, query: str) -> str:
-#         """Sanitize input query by removing/replacing problematic characters."""
-#         replacements = {
-#             "'": '',      # Remove single quotes
-#             "\\": "",     # Remove backslashes
-#             """: '"',     # Replace smart quotes
-#             """: '"',     # Replace smart quotes
-#             '"': ""       # Remove double quotes
-#         }
+        Yields:
+            Dict: State updates as the agent processes the query
+        """
+        if not self.app:
+            raise ValueError("Agent workflow not compiled. Cannot initiate.")
+        if self.logger: self.logger.debug(f"Agent: {self.agent_name}")
         
-#         sanitized = str(query)
-#         for old, new in replacements.items():
-#             sanitized = sanitized.replace(old, new)
-#         return sanitized
-
-#     def initiate_agent(self, query: str, passed_from:str=None):
-#         """Takes in query. Optional passed_from to let llm know if it's an agent, tool, or user who initated this agent."""
-#         new_query = self._sanitize_query(query)
-#         if self.logger:
-#             self.logger.debug(self.agent_name)
-#         initial_state = State(
-#             messages=[{"role": "user", "content": new_query}],
-#             current_tool="",
-#             tool_input="",
-#             tool_output="",
-#             answer="",
-#             satisfied=False,
-#             reasoning="",
-#             delegate_to_agent=None,
-#             current_node='router',
-#             previous_node=None,
-#             passed_from=passed_from
-#         )
-#         response = self.app.invoke(initial_state, {"recursion_limit": 100})
-#         return response
+        new_query = await self._sanitize_query(query)
+        
+        # Create initial state
+        initial_state = State(
+            messages=[{"role": "user", "content": new_query}],
+            current_tool="", tool_input=None, tool_output="", answer="",
+            satisfied=False, reasoning="", delegate_to_agent=None,
+            current_node='planner' if self.plan else 'router',previous_node=previous_node, plan={}, passed_from=passed_from,
+        reflection_counter=0, tool_loop_counter=0)
+        configuration = {"recursion_limit": config.MAX_RECURSION_LIMIT}
+    
+        try:
+            # Stream state updates
+            async for state in self.app.astream(initial_state, config=configuration, stream_mode=[config.stream_mode]):
+                yield state
+        
+        except Exception as e:
+            if self.logger: self.logger.error(f"Error during streaming: {e}", exc_info=True)
+            yield {
+                "answer": f"Streaming error: {e}",
+                "satisfied": False,
+                "current_node": "error"
+            }

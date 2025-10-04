@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Dict, List, Literal, Type, Tuple
+from typing import Dict, List, Literal, Type, Tuple, Callable
 from typing import Optional
 from langchain.schema import Document
 from datetime import datetime
@@ -7,6 +7,7 @@ from ..Memory.InMemoryStore import InMemoryDocStore
 from ..GenerativeModel.baseGenerativeModel.basegenerativeModel import BaseGenerativeModel
 from ..Tools.logging_setup.logger import setup_logger
 from ..prompts.prompt_templates import SUMMARY_PROMPT
+import asyncio, time
 class GenerativeModel(BaseGenerativeModel):
     def __init__(
         self, 
@@ -59,9 +60,9 @@ class GenerativeModel(BaseGenerativeModel):
         }
 
         try:
-            response = structured_llm.invoke(
+            response = (structured_llm.invoke(
                 self.prompt.format(**input_data)
-            ).model_dump()
+            )).model_dump()
             self.chat_history.append({'role': 'assistant', 'content': response})
             return response
             
@@ -81,6 +82,9 @@ class MASGenerativeModel(BaseGenerativeModel):
         long_context: bool = False,
         long_context_order: int = 10,
         chat_log: str = None,
+        streaming: bool = False,
+        streaming_callback: Optional[Callable] = None,
+        context_callable: Optional[Callable]=None,
         **kwargs
     ):
         """
@@ -98,6 +102,7 @@ class MASGenerativeModel(BaseGenerativeModel):
                 long_context (bool, optional): Flag to enable long context handling, allowing the model to process extended contextual information through summary. Defaults to True.
                 long_context_order (int, optional): The size or order of the long context when enabled. Controls how much historical data is considered. Defaults to 10.
                 chat_log (Optional[str], optional): File path to a chat log for loading past chat data as context. Defaults to None.
+                context_callable (Optional[Callable]): Callable that uses user input to give more context to the llm.
             Kwargs:
                 memory_store (InMemoryDocStore) : from masai.Memory.InMemoryStore import InMemoryDocStore and use it.
                 k (int, optional) : returns top k elements from memory store matching the query
@@ -113,6 +118,9 @@ class MASGenerativeModel(BaseGenerativeModel):
 
         self.category = category
         self.logger=setup_logger()
+        self.streaming = streaming
+        self.streaming_callback = streaming_callback
+        self.context_callable=context_callable
         
         
         self.long_context = long_context
@@ -136,7 +144,7 @@ class MASGenerativeModel(BaseGenerativeModel):
             self.LTIMStore=None            
         self.chat_log = chat_log
         
-    def _update_long_context(self, messages: List[Dict[str, str]]) -> List:
+    async def _update_long_context(self, messages: List[Dict[str, str]]) -> List:
         """
         Updates the long-term context by summarizing messages.
         
@@ -148,6 +156,7 @@ class MASGenerativeModel(BaseGenerativeModel):
         """
         
         try:
+            summary_start = time.time()
             summary: str= self.llm_long_context.generate_response(SUMMARY_PROMPT.format(messages=messages))
             if summary is not None:
                 
@@ -158,15 +167,16 @@ class MASGenerativeModel(BaseGenerativeModel):
             if len(self.context_summaries) > self.long_context_order:
                 if self.LTIMStore:
                     pass_summary = self.context_summaries[:-self.long_context_order]
-                    self._save_in_memory(pass_summary)
+                    await self._save_in_memory(pass_summary)
                 
                 # print('reducing context summaries')
                 self.context_summaries: list = self.context_summaries[-self.long_context_order:]
                 # print('size after reduction', len(self.context_summaries))
                 if self.context_summaries is None:
                    self.context_summaries = []
-                       
             
+            if self.logger:         
+                self.logger.debug(f"Summarized For LSTM {time.time()-summary_start}")
             
             return self.context_summaries
             
@@ -175,7 +185,20 @@ class MASGenerativeModel(BaseGenerativeModel):
             self.logger.error(f"Error in long context summarization: {e}")
             raise e
 
-    def generate_response_mas(
+    async def _update_context_callable(self, query, role):
+        if role.lower()=="user":
+            if self.context_callable:
+                context_result = await self.context_callable(query) if asyncio.iscoroutinefunction(self.context_callable) else self.context_callable(query)
+                
+                if isinstance(context_result, dict):
+                    self.info.update(**context_result)
+                else:
+                    self.info.update({'USEFUL DATA': context_result})
+        elif 'USEFUL DATA' in self.info.keys():
+            self.info.pop('USEFUL DATA', None)
+
+
+    async def generate_response_mas(
         self, 
         prompt: str, 
         output_structure: Type[BaseModel],
@@ -194,21 +217,172 @@ class MASGenerativeModel(BaseGenerativeModel):
             agent_name: Name of the current agent
             component_context: Additional context messages from previous components
         """
+        
+        # start=time.time()
+        
         # Handle context extension
         
             
         if self.long_context and len(self.chat_history) > self.memory_order:
-            self.context_summaries: list = self._update_long_context(self.chat_history)
-            self._update_chat_history()
+            self.context_summaries: list = await self._update_long_context(self.chat_history)
+            await self._update_chat_history()
         elif len(self.chat_history)> self.memory_order:
-            self._update_chat_history()
+            await self._update_chat_history()
 
-        role = self._update_role(agent_name,kwargs)
-        in_memory_store_data : Optional[List]=self._handle_in_memory_store_search(k=kwargs.get('k'), prompt=prompt)
-        self._update_component_context(component_context=component_context, role=role, prompt=prompt)
-                        
+        role = await self._update_role(agent_name,kwargs)
+        await self._update_context_callable(query=prompt, role=role)
+        in_memory_store_data : Optional[List] = await self._handle_in_memory_store_search(k=kwargs.get('k'), prompt=prompt)
+        await self._update_component_context(component_context=component_context, role=role, prompt=prompt)                        
         
         
+
+        # Prepare MAS-specific inputs
+        mas_inputs = {
+            "useful_info": str([self.info.items() if self.info else None]),
+            "current_time": datetime.now().strftime("%A, %B %d, %Y, %I:%M %p"),
+            "question": prompt,
+            "long_context": self.context_summaries if not in_memory_store_data else in_memory_store_data.extend(self.context_summaries),
+            "history": self.chat_history,
+            "schema": output_structure.model_json_schema(),
+            "coworking_agents_info": agent_context if agent_context is not None else "NO AGENTS PRESENT"
+        }
+        
+        try:
+            # print("\n\n\n\n",self.prompt.format(**mas_inputs),"\n\n")
+            # Use the prompt template with MAS-specific inputs
+            if self.logger:
+                startapi=time.time()
+            response = (await self.model.with_structured_output(output_structure).ainvoke(
+                self.prompt.format(**mas_inputs)
+            )).model_dump()
+            
+            if self.logger:
+                
+                
+                self.logger.debug(f"LLM Api response time {time.time()-startapi}")
+                # self.logger.info(response['answer'][:20])
+            
+            # print(response)
+            # Update chat history with structured response
+            
+            if isinstance(response, dict) and 'answer' in response:
+                self.chat_history.append({'role': role, 'content': response['answer']})
+            
+            # print("returning response", time.time()-start)
+            
+            return response
+            
+        except Exception as e:
+            print(f'LLM Response Error Occurred: {e}')
+            return str(e)
+
+    def get_category(self) -> str:
+        """Returns the category of the llm."""
+        return self.category
+    
+    
+    async def _update_chat_history(self):
+        if len(self.chat_history) > self.memory_order:
+            if self.chat_log:
+                await self._save_chat_history(chat_history=self.chat_history[:-self.memory_order//2])
+            self.chat_history=self.chat_history[-self.memory_order//2:]
+
+    
+    async def _update_component_context(self, component_context, role, prompt):
+        if component_context:
+            self.chat_history.extend(component_context)
+            self.chat_history.append({'role': role, 'content': prompt})
+        else:
+            self.chat_history.append({'role': role, 'content': prompt})
+    async def _update_role(self, agent_name, kwargs):
+        if 'passed_from' in kwargs:
+            if kwargs['passed_from'] is not None:
+                return kwargs['passed_from']
+            else:
+                return agent_name
+        else:
+            return agent_name        
+        
+    
+    async def _save_chat_history(self, chat_history):
+            """Saves the chat history to the chat_log file, if provided."""
+            if self.chat_log:
+                try:
+                    import json
+                    import aiofiles
+                    file_extension = self.chat_log.split('.')[-1].lower()
+            
+                    if file_extension == 'json':
+                        try:
+                            async with aiofiles.open(self.chat_log, 'r') as f:
+                                content = await f.read()
+                                try:
+                                    existing_data = json.loads(content)
+                                except json.JSONDecodeError:
+                                    existing_data = []
+                            
+                            if isinstance(existing_data, list):
+                                combined_data = existing_data + chat_history
+                            else:
+                                combined_data = [existing_data] + chat_history
+                            
+                            async with aiofiles.open(self.chat_log, 'w') as f:
+                                await f.write(json.dumps(combined_data, indent=4))
+                                
+                        except FileNotFoundError:
+                            async with aiofiles.open(self.chat_log, 'w') as f:
+                                await f.write(json.dumps(chat_history, indent=4))
+                    else:
+                        async with aiofiles.open(self.chat_log, 'a') as f:
+                            await f.write(str(chat_history) + '\n')
+                    
+                except Exception as e:
+                    print(f"Error saving chat history: {e}")
+                    
+    async def _save_in_memory(self, documents: List[Document|str]):
+        await self.LTIMStore.add_documents(documents=documents)
+
+    async def _handle_in_memory_store_search(self, k, prompt):
+        if self.LTIMStore:
+            k = k or 1
+            content: list = await self.LTIMStore.asearch(query=prompt, k=k)
+            if len(content)>=1:
+                return [Document(page_content='\n'.join([data['page_content'] for data in content]))]
+            else:
+                return None
+        else:
+            return None
+    async def astream_response_mas(
+        self, 
+        prompt: str, 
+        output_structure: Type[BaseModel],
+        agent_context: Optional[dict] = None,
+        agent_name: Optional[str] = "assistant",
+        component_context: list = [],
+        **kwargs
+    ):
+        """
+        MAS-specific response generation with streaming support.
+        
+        Args:
+            prompt: The input prompt
+            output_structure: Pydantic model for structured output
+            agent_context: Dictionary containing information about other agents
+            agent_name: Name of the current agent
+            component_context: Additional context messages from previous components
+            stream_callback: Function to receive streaming chunks for UI updates
+        """
+        # Handle context extension
+        if self.long_context and len(self.chat_history) > self.memory_order:
+            self.context_summaries: list = await self._update_long_context(self.chat_history)
+            await self._update_chat_history()
+        elif len(self.chat_history)> self.memory_order:
+            await self._update_chat_history()
+
+        role = await self._update_role(agent_name,kwargs)
+        await self._update_context_callable(query=prompt)
+        in_memory_store_data : Optional[List] = await self._handle_in_memory_store_search(k=kwargs.get('k'), prompt=prompt)
+        await self._update_component_context(component_context=component_context, role=role, prompt=prompt)
 
         # Prepare MAS-specific inputs
         mas_inputs = {
@@ -222,97 +396,39 @@ class MASGenerativeModel(BaseGenerativeModel):
         }
         
         try:
-            # print("\n\n\n\n",self.prompt.format(**mas_inputs),"\n\n")
-            # Use the prompt template with MAS-specific inputs
-            response = self.model.with_structured_output(output_structure).invoke(
+            # Create structured output model for streaming
+            structured_llm = self.model.with_structured_output(output_structure)
+            
+            # Final response to be returned
+            final_response = None
+            
+            # Stream the response chunks
+            async for chunk in structured_llm.astream(
                 self.prompt.format(**mas_inputs)
-            ).model_dump()
+            ):
+                # Send chunk to callback if provided
+                if self.streaming_callback:
+                    # print('streaming tokens...................', chunk)
+                    if hasattr(chunk, 'model_dump'):
+                        await self.streaming_callback(chunk.model_dump())
+                    else:
+                        await self.streaming_callback(chunk)
+                
+                # Update final response
+                final_response = chunk
             
-            # print(response)
-            # Update chat history with structured response
-            if isinstance(response, dict) and 'answer' in response:
-                self.chat_history.append({'role': role, 'content': response['answer']})
+            # Convert final response to dict if it's a model
+            if hasattr(final_response, 'model_dump'):
+                response_dict = final_response.model_dump()
+            else:
+                response_dict = final_response
+                
+            # Update chat history with the complete response
+            if isinstance(response_dict, dict) and 'answer' in response_dict:
+                self.chat_history.append({'role': role, 'content': response_dict['answer']})
             
-            return response
+            return response_dict
             
         except Exception as e:
             print(f'LLM Response Error Occurred: {e}')
-            return str(e)
-
-    def get_category(self) -> str:
-        """Returns the category of the llm."""
-        return self.category
-    
-    
-    def _update_chat_history(self):
-        if len(self.chat_history) > self.memory_order:
-            if self.chat_log:
-                self._save_chat_history(chat_history=self.chat_history[:-self.memory_order//2])
-            self.chat_history=self.chat_history[-self.memory_order//2:]
-        
-    
-    def _update_component_context(self, component_context, role, prompt):
-        if component_context:
-            self.chat_history.extend(component_context)
-            self.chat_history.append({'role': role, 'content': prompt})
-        else:
-            self.chat_history.append({'role': role, 'content': prompt})
-    def _update_role(self, agent_name, kwargs):
-        if 'passed_from' in kwargs:
-            if kwargs['passed_from'] is not None:
-                return kwargs['passed_from']
-            else:
-                return agent_name
-        else:
-            return agent_name        
-        
-    
-    def _save_chat_history(self, chat_history):
-            """Saves the chat history to the chat_log file, if provided."""
-            if self.chat_log:
-                try:
-                    import json
-                    file_extension = self.chat_log.split('.')[-1].lower()
-                    
-                    if file_extension == 'json':
-                        try:
-                            with open(self.chat_log, 'r+') as f:
-                                try:
-                                    existing_data = json.load(f)
-                                except json.JSONDecodeError:
-                                    existing_data = []  # Handle empty or invalid JSON file
-                                
-                                if isinstance(existing_data, list):
-                                    combined_data = existing_data + chat_history
-                                else:
-                                    combined_data = [existing_data] + chat_history  # Handle case where existing data is not a list
-                                
-                                f.seek(0)  # Rewind to the beginning of the file
-                                json.dump(combined_data, f, indent=4)
-                                f.truncate()  # Remove any remaining old data
-                        except FileNotFoundError:
-                            # File doesn't exist, create it and save the chat history
-                            with open(self.chat_log, 'w') as f:
-                                json.dump(chat_history, f, indent=4)
-                    else:
-                        with open(self.chat_log, 'a') as f:
-                            f.write(str(chat_history) + '\n')  # Append as string with newline
-                    
-                    # print(f"Chat history saved to {self.chat_log}")
-                except Exception as e:
-                    print(f"Error saving chat history: {e}")
-                    
-    def _save_in_memory(self, documents: List[Document|str]):
-        self.LTIMStore.add_documents(documents=documents)
-    def _handle_in_memory_store_search(self,k, prompt):
-        if self.LTIMStore:
-            k = k or 1
-            content: list=self.LTIMStore.search(query=prompt, k=k)
-            if len(content)>=1:
-                # print("Found Match", content)
-                return [Document(page_content='\n'.join([data['page_content'] for data in content]))]
-            else:
-                return None
-        else:
-            return None
-        
+            return {'error': str(e)}

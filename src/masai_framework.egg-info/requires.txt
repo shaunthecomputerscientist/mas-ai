@@ -33,5 +33,6 @@ tiktoken>=0.8.0
 langchain-experimental
 redis>=5.2.1
 numpy
+aiofiles>=24.1.0
 
 [tools]

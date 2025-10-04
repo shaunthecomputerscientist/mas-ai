@@ -1,27 +1,10 @@
-# Define a color map dictionary
-COLOR_MAP = {
-    'black': "\033[30m",
-    'red': "\033[31m",
-    'green': "\033[32m",
-    'yellow': "\u001b[33m",
-    'blue': "\033[34m",
-    'magenta': "\u001b[35m",
-    'cyan': "\033[36m",
-    'white': "\033[37m",
-    'reset': "\033[0m"
-}
-
-# Example usage:
 import re
 import time
 import sys
 from typing import Dict, Callable, List
 
 def token_stream(text, color='white', delay=0.08, token_type='word'):
-    """Stream text with a specified color using a tokenization method."""
-    # Use the provided color from our COLOR_MAP. Default to white if not found.
-    color_code = COLOR_MAP.get(color.lower(), COLOR_MAP['white'])
-    
+    """Stream text without colors - simple tokenization method."""
     # Split text into tokens (words and newlines)
     tokens = []
     current = []
@@ -35,19 +18,18 @@ def token_stream(text, color='white', delay=0.08, token_type='word'):
             current.append(char)
     if current:
         tokens.append(''.join(current))
-    
-    # Set the color and start streaming tokens
-    sys.stdout.write(color_code)
+
+    # Stream tokens without colors
     for i, token in enumerate(tokens):
         if token == '\n':
             sys.stdout.write('\n')
             sys.stdout.flush()
             continue
-            
+
         sys.stdout.write(token)
         sys.stdout.flush()
         time.sleep(delay)
-        
+
         # If the next token is not a newline and we're tokenizing by word, add a space.
         if token_type == 'word' and i < len(tokens) - 1 and tokens[i+1] != '\n':
             sys.stdout.write(' ')
@@ -55,9 +37,6 @@ def token_stream(text, color='white', delay=0.08, token_type='word'):
         if token_type=="word" and i==len(tokens) - 1:
             sys.stdout.write('\n\n')
             sys.stdout.flush()
-    
-    # # Reset the terminal color at the end.
-    # sys.stdout.write(COLOR_MAP['reset'] + "\n")
 class MarkupProcessor:
     """Process text markup with enhanced LaTeX block/inline handling and terminal formatting"""
     
@@ -173,21 +152,20 @@ class MarkupProcessor:
         # Convert LaTeX to Unicode
         content = re.sub(r'\\(.*?)(\W|$)', self._replace_unicode, content)
         
-        # Format based on delimiter type
+        # Format based on delimiter type (no colors)
         if delimiter in ('$$', '\\['):
-            return f"{COLOR_MAP['cyan']}\n  {content}\n{COLOR_MAP['reset']}"
-        return f"{COLOR_MAP['cyan']} {content} {COLOR_MAP['reset']}"
+            return f"\n  {content}\n"
+        return f" {content} "
 
     def _handle_bold(self, match: re.Match) -> str:
-        return f"\033[1m{match.group(1)}\033[0m"
+        return f"**{match.group(1)}**"
 
     def _handle_italic(self, match: re.Match) -> str:
-        return f"\033[3m{match.group(1)}\033[0m"
+        return f"*{match.group(1)}*"
 
     def _handle_color_tag(self, match: re.Match) -> str:
-        color = match.group(1).lower()
         content = match.group(2)
-        return f"{COLOR_MAP.get(color, '')}{content}{COLOR_MAP['reset']}"
+        return content  # Just return content without color tags
 
     def process(self, text: str) -> str:
         """Main processing method with LaTeX validation"""

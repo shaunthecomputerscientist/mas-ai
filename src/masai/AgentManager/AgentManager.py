@@ -1,5 +1,5 @@
 import os, json
-from typing import List, Tuple, Type, Union, Literal, Dict, Optional
+from typing import List, Tuple, Type, Union, Literal, Dict, Optional, Callable
 from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, PromptTemplate, SystemMessagePromptTemplate
 from ..GenerativeModel.generativeModels import MASGenerativeModel
 from ..Agents.singular_agent import Agent
@@ -13,33 +13,54 @@ class AgentDetails:
     style: str = "gives very elaborate answers"  # Communication style
     
 class AgentManager:
-    def __init__(self, logging=True, context:dict=None, model_config_path=None, chat_log:str=None):
+    def __init__(self, logging=True, context:dict=None, model_config_path=None, chat_log:str=None, streaming:bool= False, streaming_callback : Optional[Callable]=None):
         """Initialize the AgentManager with an empty registry of agents.
 
-        The AgentManager class serves as a central registry for creating, managing, and 
-        coordinating multiple agents in a multi-agent system.
+            The AgentManager class serves as a central registry for creating, managing, and
+            coordinating multiple agents in a multi-agent system.
 
-        Args:
-            logging (bool, optional): Enable or disable logging of agent activities. 
-                Defaults to True.
-            context (dict, optional): Additional contextual information to be shared 
-                with all agents. Defaults to None.
-            chat_log (str, optional): Path to file where chat log needs to be saved.
-                Defaults to None.
+            Args:
+                logging (bool, optional): Enable or disable logging of agent activities.
+                    Defaults to True.
+                context (dict, optional): Additional contextual information to be shared
+                    with all agents. Defaults to None.
+                model_config_path (str): Path to the model configuration file.
+                    This is a required argument.
+                chat_log (str, optional): Path to file where chat log needs to be saved.
+                    Defaults to None.
+                streaming (bool, optional): Enable or disable streaming of responses from
+                    LLMs. Defaults to False.
+                streaming_callback (Optional[Callable], optional): An async callable
+                    function that will be called with chunks of streamed content if
+                    `streaming` is True. Must be provided if `streaming` is True.
+                    Defaults to None.
 
-        Attributes:
-            agents (dict[str, Agent]): Dictionary storing agent instances,
-                where keys are agent names and values are Agent objects.
-            agent_prompts (dict): Dictionary storing system prompts for each agent.
-            logging (bool): Flag to control logging behavior.
-            context (dict): Shared context available to all agents.
-            model_config_path (Path): Path to the model configuration file.
-        """
+        Attributes:
+            agents (dict[str, Agent]): Dictionary storing agent instances,
+                where keys are agent names and values are Agent objects.
+            agent_prompts (dict): Dictionary storing system prompts for each agent.
+            logging (bool): Flag to control logging behavior.
+            context (dict): Shared context available to all agents.
+            model_config_path (str): Path to the model configuration file.
+            chat_log (str or None): Path to the chat log file, or None if logging
+                to file is disabled.
+            streaming (bool): Flag indicating if streaming is enabled.
+            streaming_callback (Optional[Callable]): The callback function for streaming,
+                or None if streaming is disabled.
+
+        Raises:
+            ValueError: If `model_config_path` is not provided or if `streaming` is
+                        True but `streaming_callback` is not provided.
+        """
         self.agents = {}
         self.agent_prompts = {}
         self.logging = logging
         self.context = context
         self.chat_log=chat_log
+        self.streaming = streaming
+        self.streaming_callback = streaming_callback
+        if self.streaming and not self.streaming_callback:
+            raise ValueError("Streaming callback needs to be provided for streaming. Should be async callable that takes in chunks.")
         
         # model_config_path should be provided by user
         if not model_config_path:
@@ -54,13 +75,13 @@ class AgentManager:
         """Format prompts into ChatPromptTemplates."""
         input_variables = ['question', 'history', 'schema','current_time','useful_info','coworking_agents_info','long_context']
         template = """
-        INFO:{useful_info},
-        \n\nTIME:{current_time},
-        \n\nAVAILABLE AGENTS:{coworking_agents_info},
-        \n\nRESPONSE FORMAT : {schema},
-        \n\nCHAT HISTORY: {history},
-        \n\nEXTENDED CONVERSATION CONTEXT: {long_context},
-        \nQUESTION: {question},
+        <INFO>:{useful_info}</INFO>
+        \n\n<TIME>:{current_time}</TIME>
+        \n\n<AVAILABLE COWORKING AGENTS>:{coworking_agents_info}</AVAILABLE COWORKING AGENTS>
+        \n\n<RESPONSE FORMAT>:{schema}</RESPONSE FORMAT>
+        \n\n<CHAT HISTORY>:{history}</CHAT HISTORY>
+        \n\n<EXTENDED CONTEXT>:{long_context}</EXTENDED CONTEXT>
+        \n<QUESTION>:{question}</QUESTION>
         """
         
         human_message_template = HumanMessagePromptTemplate(
@@ -105,7 +126,7 @@ class AgentManager:
 
     def create_agent(self, agent_name: str, tools: List[object], agent_details: AgentDetails, 
                  memory_order: int = 10, long_context: bool = True,long_context_order: int = 20, shared_memory_order: int = 10, 
-                 plan: bool = False,temperature=0.2,**kwargs):
+                 plan: bool = False,temperature=0.2,context_callable:Optional[Callable]=None, **kwargs):
         """Create and register a new agent in the AgentManager.
 
         Args:
@@ -117,6 +138,7 @@ class AgentManager:
             long_context_order (int, optional): Number of past interactions summary to keep in long context. Defaults to 10.
             shared_memory_order (int, optional): Shared memory size for components. Defaults to 10.
             plan (bool, optional): Include planner if True. Defaults to False.
+            context_callable (Optional[Callable]): Callable that uses user input to give more context to the llm during inference.
             
             **kwargs: Additional keyword arguments.  Can include:
                 - `config_dict` (dict, optional): A dictionary specifying memory order overrides for individual LLMs.
@@ -167,6 +189,9 @@ class AgentManager:
                     "long_context": long_context,
                     "long_context_order":long_context_order,
                     "chat_log":self.chat_log,
+                    "streaming": self.streaming,
+                    "streaming_callback": self.streaming_callback,
+                    "context_callable": context_callable
                     }
         if kwargs.get('in_memory_store'):
             llm_args["memory_store"] = kwargs['in_memory_store']
@@ -198,8 +223,8 @@ class AgentManager:
             llm_planner = None
 
         agent = Agent(agent_name, llm_router, llm_evaluator, llm_reflector, llm_planner, tool_mapping, AnswerFormat, self.logging, shared_memory_order=shared_memory_order)
-        self.agents[agent_name] = agent
-        self.agent_prompts[agent_name] = system_prompt
+        self.agents[agent_name.lower()] = agent
+        self.agent_prompts[agent_name.lower()] = system_prompt
     def _compile_agents(self,type='decentralized',agent_context:dict=None):
         """Share agent system prompts among all registered agents.
 
@@ -233,11 +258,11 @@ class AgentManager:
 
     def _create_system_prompt(self, agent_name: str, details: AgentDetails) -> str:
         """Convert AgentDetails into a system prompt."""
-        capabilities_str = ", ".join(details.capabilities)
+        capabilities_str = ",".join(details.capabilities)
         
         prompt_parts = [
-            f"Your Name: {agent_name}.\n Your capabilities are {capabilities_str}",
-            f"Response Style: {details.style}."
+            f"\n NAME: {agent_name}.\n YOUR CHARACTERISTICS AND CAPABILITIES {capabilities_str}",
+            f"RESPONSE STYLE: {details.style}."
         ]
         
         if details.description:

@@ -8,19 +8,9 @@ langchain-groq>=0.2.3  # Groq integration
 langchain-openai>=0.3.2  # OpenAI integration
 langchain_neo4j>=0.3.0  # Neo4j integration
 langchain-milvus  # Milvus integration
+langchain_huggingface>=0.1.2
 langchain-google-community>=2.0.4
 
-# Graph and Vector Databases
-# neo4j>=5.28.1  # Neo4j driver
-# pymilvus>=2.4.8  # Milvus client for vector database
-# chromadb>=0.6.3  # Chroma vector DB
-# networkx>=3.4.2  # Graph manipulation
-
-# Visualization
-# pythreejs  # 3D visualization
-# PyQt5  # GUI for standalone pythreejs visualization
-# matplotlib  # Static plotting
-# seaborn  # Enhanced visualization
 
 # AI/ML and Text Processing
 google-generativeai>=0.8.4  # Google AI SDK
@@ -28,19 +18,10 @@ openai>=1.60.0  # OpenAI SDK
 anthropic>=0.34.2  # Anthropic SDK
 groq>=0.13.1  # Groq SDK
 sentence-transformers>=3.4.0  # Embeddings
-# transformers>=4.48.1  # Hugging Face transformers
-# spacy # NLP tools
-# rank-bm25 # BM25 ranking algorithm
+
 
 # Search and Web APIs
 beautifulsoup4  # HTML parsing
-# duckduckgo-search  # Search tool
-# wikipedia  # Wikipedia API
-# arxiv  # Arxiv API
-# tavily-python>=0.5.0  # Tavily search
-# youtube-transcript-api>=0.6.3  # YouTube transcripts
-# google-api-python-client>=2.159.0  # Google APIs (e.g., YouTube Data API, Custom Search)
-# nylas>=6.7.0  # Nylas API for email, calendar, contacts
 
 # Local Models and Inference
 ollama>=0.4.4  # Ollama for local model inference
@@ -49,7 +30,7 @@ ollama>=0.4.4  # Ollama for local model inference
 psycopg2-binary  # PostgreSQL driver (optional unless directly used)
 PyPDF2  # PDF processing
 python-dotenv  # Environment variables
-# PyAutoGUI  # GUI automation
+PyAutoGUI  # GUI automation
 pydantic  # Data validation
 tenacity # Retry logic
 tqdm  # Progress bars
@@ -60,3 +41,31 @@ json_repair
 redis>=5.2.1
 numpy
 colorama>=0.4.6
+aiofiles>=24.1.0
+
+#tools and utilities
+
+duckduckgo-search  # Search tool
+wikipedia  # Wikipedia API
+arxiv  # Arxiv API
+tavily-python>=0.5.0  # Tavily search
+youtube-transcript-api>=0.6.3  # YouTube transcripts
+google-api-python-client>=2.159.0  # Google APIs (e.g., YouTube Data API, Custom Search)
+nylas>=6.7.0  # Nylas API for email, calendar, contacts
+transformers>=4.48.1  # Hugging Face transformers
+spacy # NLP tools
+rank-bm25 # BM25 ranking algorithm
+
+# Graph and Vector Databases
+neo4j>=5.28.1  # Neo4j driver
+pymilvus>=2.4.8  # Milvus client for vector database
+chromadb>=0.6.3  # Chroma vector DB
+langchain-pinecone>=0.2.3 #pinecone vectordb.
+networkx>=3.4.2  # Graph manipulation
+PyMuPDF>=1.25.5
+
+# Visualization
+pythreejs  # 3D visualization
+PyQt5  # GUI for standalone pythreejs visualization
+matplotlib  # Static plotting
+seaborn  # Enhanced visualization

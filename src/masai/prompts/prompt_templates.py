@@ -1,10 +1,11 @@
 ROUTER_PROMPT = """
 Understand user question and intent from past interactions and take best course of action.
-RULES:
+GENERAL GUIDELINES:
    1) Enclose all dictionary properties/values in double quotes for valid JSON 
    2) Strictly adhere to tool_input schema for tool_input of available tools. 
    3) Leverage CHAT HISTORY + QUESTION + ALL AVAILABLE INFO for more context. 
-   4) Assign tasks to specialized agents when it seems fit. 
+   4) Assign tasks to specialized agents when it seems fit.
+   5) Use USEFUL DATA IN INFO when available.
 DECISION FLOW (ACTION TYPES): 
    1) Continue working (satisfied=False + tool_input≠None) → Use tools/knowledge/chat_history,context; 
    2) Delegate (satisfied=True + tool=None + delegate_to_agent=name) → Delegate task when necessary. 
@@ -12,11 +13,11 @@ ERROR PROTOCOLS: Reuse existing info from history, prevent loops via attempt tra
 """
 
 EVALUATOR_PROMPT = """
-RULES: 
+GENERAL GUIDELINES: 
    1) Enclose all dictionary properties/values in double quotes for valid JSON 
    2) Strictly adhere to tool_input schema for tool_input of available tools. 
    3) Leverage CHAT HISTORY + QUESTION + ALL AVAILABLE INFO for more context. 
-   4) Assign tasks to specialized agents when it seems fit. 
+   4) Assign tasks to specialized agents when needed. 
 DECISION FLOW (ACTION TYPES): 
    1) Continue working (satisfied=False + tool_input≠None) → Use tools/knowledge/chat_history,context; 
    2) Reflect/reason (satisfied=False + tool_input=None) → Analyze context for next steps; 
@@ -25,12 +26,12 @@ ERROR PROTOCOLS: Reuse existing info from history, provide detailed failure/dele
 """
 
 PLANNER_PROMPT = """
-Your task right now is to plan necessary steps in detail given the user query.
+Your task right now is to plan necessary steps in detail given the user query or delegate to agent.
 
 GOAL: 
 1.PASS the plan to the evaluator. Evaluator will execute the plan and return the answer. So write detailed plan. 
 2.Make an informed decision looking at all the tools available. Make a detailed list of tasks to accomplish the goal, explaining the evaluator what to do. Your answer will be passed to the evaluator.
-3.Alternatively, Pass task to appropriate agent by setting variables as needed.
+3.Alternatively, Pass task to appropriate agent (if needed) by setting variables as needed.
 
 GUIDELINE:
 1. Do not use any tools. Rather use knowledge of tools to make a plan.
@@ -87,6 +88,75 @@ SUMMARY_PROMPT="""YOU Can create informative summaries in sequence of long conve
         
    {messages}
    """
+TOOL_LOOP_WARNING_PROMPT = """\n\nWARNING: YOU APPEAR TO BE STUCK IN A TOOL USE LOOP. REANALYZE CONVERSATION HISTORY, PREVIOUS TOOL OUTPUTs, GOALs, TASKSs, etc. 
+DECIDE IF YOU NEED DIFFERENT TOOL, PASS TO OTHER AGENT, REFLECT or ANSWER DIRECTLY\n\n"""
+
+
+EVALUATOR_NODE_PROMPT = (
+    "{warning}\n\n"
+    "=== CONTEXT ===\n"
+    "USER QUESTION:\n{original_question}\n\n"
+    "Output from Previous Tool:\n{tool_output}\n"
+    "{plan_str}\n"
+    "=== END CONTEXT ===\n\n"
+)
+
+REFLECTOR_NODE_PROMPT = (
+    "{warning}\n\n"
+    "=== CONTEXT ===\n"
+    "Current Stage: REFLECTION (Attempt {reflection_count_display})\n"
+    "ORIGINAL QUESTION:\n{original_question}\n\n"
+    "Previous Tool Output:\n{tool_output}\n"
+    "{plan_str}\n"
+    "=== END CONTEXT ===\n\n"
+    
+    "=== TASK ===\n"
+    "You have reached a stage where the evaluation could not confirm goal satisfaction, or no tool was deemed suitable.\n"
+    "1. Reflect on all available information so far.\n"
+    "2. If you believe you can now produce the final answer:\n"
+    "   - Set `satisfied=True`\n"
+    "   - Provide the final answer.\n"
+    "3. If a specific tool should now be used:\n"
+    "   - Set `satisfied=False`\n"
+    "   - Specify `tool` and `tool_input`.\n"
+    "4. If you're still stuck and cannot proceed, explain why and set `satisfied=False`, `tool=None`.\n"
+    
+    "This reflection is your internal reasoning to determine the next best move.\n\n"
+)
+
+
+
+PLANNER_NODE_PROMPT = (
+    "{warning}\n\n"
+    "=== CONTEXT ===\n"
+    "Current Stage: PLANNING\n"
+    "User Request:\n{original_question}\n"
+    "=== END CONTEXT ===\n\n"
+    
+    "=== TASK ===\n"
+    "1. Create a high-level step-by-step plan (as a numbered list) to fulfill the user's request.\n"
+    "2. Based ONLY on Step 1 of your plan:\n"
+    "   - Decide the next immediate action.\n"
+    "   - If Step 1 requires a tool, specify `tool` and `tool_input`.\n"
+    "   - If Step 1 involves direct reasoning or reflection, set `tool=None`.\n"
+    "   - Set `satisfied=False` (planning stage is never final).\n\n"
+    
+    "=== RESPONSE FORMAT ===\n"
+    "answer: <your full multi-step plan>\n"
+    "tool: <tool name or None>\n"
+    "tool_input: <input string>\n"
+    "satisfied: False\n"
+)
+
+ROUTER_NODE_PROMPT = (
+    "{warning}\n\n"
+    "=== CONTEXT ===\n"
+    "ORIGINAL QUESTION:\n{original_question}\n"
+    "{plan_str}\n"
+    "=== END CONTEXT ===\n\n"
+    )
+
+
 
 def get_agent_prompts() -> tuple[str, str, str]:
     """Get the router, evaluator, and reflector prompts."""

@@ -4,15 +4,15 @@ from typing import List, Optional, Union, Callable
 from sentence_transformers import SentenceTransformer
 
 # Optional import for LangChain Document compatibility
-try:
-    from langchain_core.documents import Document
-except ImportError:
-    Document = None  # Fallback if LangChain isn’t installed
+# try:
+from langchain.schema.document import Document
+# except ImportError:
+#     Document = None  # Fallback if LangChain isn’t installed
 
 class InMemoryDocStore:
-    def __init__(self, documents: Optional[List[Union[str, 'Document']]] = None, 
+    def __init__(self, documents: Optional[List[Union[str, Document]]] = None, 
                  ids: Optional[List[str]] = None, 
-                 embedding_model: Optional[Union[str, Callable, object]] = None):
+                 embedding_model: Optional[Union[str, Callable, object]] = 'all-MiniLM-L6-v2'):
         """
         Initialize the custom document store.
 
@@ -59,7 +59,7 @@ class InMemoryDocStore:
             if self.embedding_model:
                 self._update_embeddings(documents)
 
-    def _normalize_doc(self, doc: Union[str, dict, 'Document']) -> dict:
+    def _normalize_doc(self, doc: Union[str, dict, Document]) -> dict:
         """Convert a document (str, dict, or Document) to a standard dict format."""
         if isinstance(doc, str):
             return {'page_content': doc}
@@ -90,7 +90,7 @@ class InMemoryDocStore:
         else:
             self.embedding_matrix = np.vstack([self.embedding_matrix, embeddings])
 
-    def add_documents(self, documents: List[Union[str, 'Document']], ids: Optional[List[str]] = None):
+    def add_documents(self, documents: List[Union[str, Document]], ids: Optional[List[str]] = None):
         """
         Add new documents to the store.
 
@@ -130,7 +130,7 @@ class InMemoryDocStore:
         """
         return self.doc_store.get(id_)
 
-    def search(self, query: str, k: int = 5) -> List[dict]:
+    async def asearch(self, query: str, k: int = 5) -> List[dict]:
         """
         Search for the top-k most similar documents to the query.
 

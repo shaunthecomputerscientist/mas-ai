@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 def answermodel(tool_names: List[str], tools) -> Type[BaseModel]:
         """Define the AnswerFormat model dynamically based on tools."""
         class AnswerFormat(BaseModel):
-            answer: Optional[Union[str,List[str],Dict]] = Field(..., description="Your final generated answer which will be seen by human.")
+            answer: Optional[Union[str,List[str],Dict]] = Field(..., description="Write final generated answer/response when finished the task.")
             satisfied: bool = Field(..., description="Set to True to return final answer and (tool,tool_input=None). Set to False for further work on task (reflection, tool usage, etc).")
             tool: Optional[str] = Field(
                 None,
@@ -17,7 +17,7 @@ def answermodel(tool_names: List[str], tools) -> Type[BaseModel]:
             tool_input: Optional[Union[Dict, str]] = Field(
                 None,
                 description=f"""Always provide tool input as valid JSON. TOOL INPUT SCHEMA: {[(tool.name, tool.args_schema.model_json_schema()['properties']) for tool in tools]}.
-                            Set to None if no tool is needed.
+                            \n\nSet to None if no tool is needed.
                             If optional parameters are not needed in tool input, for a task, refrain from using them."""
             )
             reasoning: str = Field(..., description="Logical reasoning and context analysis that justifies your answer.")

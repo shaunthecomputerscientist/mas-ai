@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "masai_framework"
-version = "0.1.24"  # Update this to a new version
+version = "0.1.33"  # Update this to a new version
 authors = [{ name = "PILER", email = "mrpolymathematica@gmail.com" }]
 description = "Multi-Agent System Framework for AI Agents built on LangGraph"
 readme = "README.md"
@@ -44,7 +44,8 @@ dependencies = [
     "tiktoken>=0.8.0",
     "langchain-experimental",
     "redis>=5.2.1",
-    "numpy"
+    "numpy",
+    "aiofiles>=24.1.0"  
 ]
 
 [project.optional-dependencies]

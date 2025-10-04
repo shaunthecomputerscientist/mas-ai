@@ -7,10 +7,17 @@ from langchain_community.chat_models.anthropic import ChatAnthropic
 from langchain_openai.chat_models import ChatOpenAI
 from langchain_groq.chat_models import ChatGroq
 from pydantic import BaseModel
-from typing import Dict, List, Literal, Type
+from typing import Dict, List, Literal, Type, AsyncGenerator, Union
 from typing import Optional
 from langchain_core.prompts import ChatPromptTemplate
 from datetime import datetime, timezone
+from ...prompts.Template.template import PromptTemplate
+from ...Tools.logging_setup.logger import setup_logger
+import logging
+
+# Use shared logger instead of separate instance
+logger = setup_logger()
+
 
 class BaseGenerativeModel:
     def __init__(
@@ -20,8 +27,11 @@ class BaseGenerativeModel:
         temperature: float,
         memory: bool = True,
         memory_order: int = 5,
-        prompt_template: Optional[ChatPromptTemplate] = None,
-        info: Optional[dict] = None
+        prompt_template: Optional[Union[PromptTemplate, ChatPromptTemplate]] = None,
+        info: Optional[dict] = None,
+        system_prompt: Optional[str]= None,
+        input_variables: Optional[List[str]] = None,
+        logging: Optional[bool] = False
     ):
         """Initialize the BaseGenerativeModel.
 
@@ -33,6 +43,8 @@ class BaseGenerativeModel:
             memory_order (int, optional): Number of messages to keep in memory. Defaults to 5.
             prompt_template (Optional[ChatPromptTemplate], optional): Prompt template for the model. Defaults to None.
             info (Optional[dict], optional): Information to the model. Defaults to None.
+            system_prompt(Optional[str]): Bypass Chatprompt Template by simply providing a system prompt. Useful when using astream_response for simple usecases where defining complicated chatpromptemplate is not necessary.
+            input_variables (Optional[List[str]], optional): Input variables for the prompt template. Defaults to None.
         
         Add api keys to the environment variables as follows for the categories we support:
         OPENAI_API_KEY
@@ -42,6 +54,7 @@ class BaseGenerativeModel:
         OLLAMA_BASE_URL
         GROQ_API_KEY
         Only for ollama, you need to install ollama and run it locally.
+        Set OLLAMA_BASE_URI in env variable.
         Provide api keys only for selected categories.
         """
         self.model_name = model_name
@@ -52,9 +65,15 @@ class BaseGenerativeModel:
         self.info = info
         self.chat_history = []
         self.category = category
-        
+        if logging:
+            self.logger = logger
+        else: self.logger = None
         # Initialize the LLM
         self.model = self._get_llm()
+        
+        if system_prompt:
+            self.prompt = self.prompt_formatter(system_prompt=system_prompt, input_variables=input_variables)
+
     def _get_llm(self):
             try:
                 if "gemini" in self.category:
@@ -186,6 +205,9 @@ class BaseGenerativeModel:
 
         # Combine all components into final prompt
         full_prompt = "\n".join(prompt_parts)
+        
+        if self.logger:
+            logger.info(full_prompt)
 
         # Generate response
         response = structured_llm.invoke(full_prompt).model_dump()
@@ -193,3 +215,138 @@ class BaseGenerativeModel:
         if self.memory:
             self.chat_history.append({'role': 'assistant', 'content': response})
         return response
+    
+    async def astream_response(self, prompt: str, custom_inputs: Optional[dict] = None) -> AsyncGenerator[str, None]:
+        """
+        Streams a response from the model, with memory support but no structured output.
+        
+        Args:
+            prompt: The input prompt.
+            custom_inputs: Optional dictionary of custom template variables corresponding to the prompt template.
+            
+            Mandatory variables that should always be present:
+            question: The input prompt.
+            useful_info: Useful info for the model, default is None.
+            current_time: The current time. Added for additional context.
+            history: The chat history. If memory is True, the chat history is automatically added to the prompt.
+            These variables are automatically added to the prompt.
+        """
+        if self.memory:
+            self.chat_history.append({'role': 'user', 'content': prompt})
+
+        # Mandatory variables
+        mandatory_vars = ['question', 'useful_info', 'current_time', 'history']
+
+        # Create base inputs with fallback values
+        base_inputs = {
+            'question': prompt,
+            'current_time': datetime.now().strftime("%A, %B %d, %Y, %I:%M %p"),
+            'history': self.chat_history[-self.memory_order:] if self.memory else [],
+            'useful_info': str(self.info.items()) if self.info else 'None'
+        }
+
+        # Determine which mandatory vars are in the template
+        template_vars = set(self.prompt.input_variables) if self.prompt else set()
+        present_in_template = {var for var in mandatory_vars if var in template_vars}
+        missing_from_template = set(mandatory_vars) - present_in_template
+
+        # Build prompt components
+        prompt_parts = []
+
+        # Add mandatory vars NOT in template as raw strings
+        for var in missing_from_template:
+            prompt_parts.append(f"{var}: {base_inputs[var]}")
+
+        # Create template inputs from base + custom inputs that are in template
+        template_inputs = {
+            k: v for k, v in {**base_inputs, **(custom_inputs or {})}.items()
+            if k in template_vars
+        }
+
+        # Add formatted template if there are inputs for it
+        if template_inputs and self.prompt:
+            prompt_parts.append(self.prompt.format(**template_inputs))
+
+        # Add remaining custom inputs not in template or mandatory vars
+        if custom_inputs:
+            extra_custom = {
+                k: v for k, v in custom_inputs.items()
+                if k not in template_vars and k not in mandatory_vars
+            }
+            for k, v in extra_custom.items():
+                prompt_parts.append(f"{k}: {v}")
+
+        # Combine all components into final prompt
+        full_prompt = "\n".join(prompt_parts)
+
+        
+        if self.logger:
+            logger.info(full_prompt)
+
+        # Stream response
+        response_content = ""
+        if self.memory:
+            # messages = self.chat_history[-self.memory_order:] if len(self.chat_history) > self.memory_order else self.chat_history
+            async for chunk in self.model.astream(full_prompt):
+                response_content += chunk.content
+                yield chunk.content
+        else:
+            async for chunk in self.model.astream(full_prompt):
+                response_content += chunk.content
+                yield chunk.content
+
+        # Update chat history with the complete response
+        if self.memory:
+            self.chat_history.append({'role': 'assistant', 'content': response_content})
+            
+
+            
+    def prompt_formatter(
+        self,
+        system_prompt: str,
+        input_variables: list = []
+    ) -> PromptTemplate:
+        """
+        Format prompts into PromptTemplates with dynamic sections based on input variables.
+
+        Args:
+            system_prompt (str): Base system prompt.
+            input_variables (list): List of input variables to include in the template.
+
+        Returns:
+            PromptTemplate: A formatted prompt template with all specified variables.
+        """
+        # Ensure required variables are included
+        mandatory_vars=[]
+        # print(input_variables)
+        if isinstance(input_variables,list):
+            if len(input_variables)<1:
+                input_variables = ['useful_info','current_time','history','question']
+            elif len(input_variables) >= 1:
+                for element in ['useful_info','current_time','history','question']:
+                    if element not in input_variables:
+                        mandatory_vars.append(element)
+
+        
+        # Dynamically build template sections for each input variable
+        template_sections = []
+        input_variables=mandatory_vars+input_variables
+        for var in input_variables:
+            # Format the variable name for display (uppercase with spaces)
+            display_name = var.replace('_', ' ').upper()
+            
+            # Create a section for this variable
+            template_sections.append(f"<{display_name}>:{{{var}}}</{display_name}>")
+        
+        # Join all sections with newlines
+        base_template = "\n\n".join(template_sections)
+        
+        # Create PromptTemplate instance
+        prompt_template = PromptTemplate(
+            system_template="SYSTEM: \n" + system_prompt,
+            human_template='HUMAN: \n\n' + base_template,
+            input_variables=input_variables
+        )
+
+        # print(prompt_template.human_template)
+        return prompt_template

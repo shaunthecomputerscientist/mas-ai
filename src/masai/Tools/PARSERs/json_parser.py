@@ -1,5 +1,52 @@
 import json
 import re
+import logging
+
+# Setup logger for JSON parser
+logger = logging.getLogger(__name__)
+
+def repair_json_string(json_str: str) -> str:
+    """
+    Attempt to repair common JSON string issues by adding missing closing brackets/braces.
+    Uses a stack-based approach to determine the correct order of closing characters.
+
+    Args:
+        json_str: Potentially malformed JSON string
+
+    Returns:
+        Repaired JSON string
+    """
+    # Remove leading/trailing whitespace
+    json_str = json_str.strip()
+
+    # Use a stack to track opening brackets/braces and determine what's missing
+    stack = []
+    for char in json_str:
+        if char in ('{', '['):
+            stack.append(char)
+        elif char == '}':
+            if stack and stack[-1] == '{':
+                stack.pop()
+        elif char == ']':
+            if stack and stack[-1] == '[':
+                stack.pop()
+
+    # If stack is not empty, we have unclosed brackets/braces
+    if stack:
+        # Add closing characters in reverse order
+        closing_chars = []
+        for open_char in reversed(stack):
+            if open_char == '{':
+                closing_chars.append('}')
+            elif open_char == '[':
+                closing_chars.append(']')
+
+        repaired = json_str + ''.join(closing_chars)
+        logger.warning(f"Repaired JSON string by adding {len(closing_chars)} closing character(s): {''.join(closing_chars)}")
+        return repaired
+
+    return json_str
+
 
 def clean_input(text):
     """
@@ -19,13 +66,22 @@ def clean_input(text):
 
 def parse_json(text):
     """
-    Attempts to parse the cleaned text as JSON.
+    Attempts to parse the cleaned text as JSON with automatic repair for malformed JSON.
     Returns a dictionary if successful, otherwise raises an error.
     """
     try:
+        # First attempt: direct parsing
         return json.loads(text)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse JSON: {e}")
+        # Second attempt: try to repair and parse
+        logger.warning(f"Initial JSON parsing failed: {e}. Attempting repair...")
+        try:
+            repaired = repair_json_string(text)
+            result = json.loads(repaired)
+            logger.info(f"Successfully parsed repaired JSON string")
+            return result
+        except json.JSONDecodeError as repair_error:
+            raise ValueError(f"Failed to parse JSON. Original error: {e}. Repair attempt also failed: {repair_error}")
 
 def parse_task_string(task_str: str) -> list[str]:
     """
@@ -51,18 +107,28 @@ def parse_task_string(task_str: str) -> list[str]:
 def handle_tool_input(parsed_dict):
     """
     Ensures that 'tool_input' in the parsed dictionary is always a valid dictionary.
-    If 'tool_input' is not a dictionary, attempts to parse it into one.
+    If 'tool_input' is not a dictionary, attempts to parse it into one with automatic repair.
     """
     if "tool_input" in parsed_dict:
         if isinstance(parsed_dict["tool_input"], str):
             try:
-                # Attempt to parse tool_input as JSON
+                # First attempt: direct parsing
                 parsed_dict["tool_input"] = json.loads(parsed_dict["tool_input"])
-            except json.JSONDecodeError:
-                raise ValueError(f"Invalid tool_input format: {parsed_dict['tool_input']}")
+            except json.JSONDecodeError as e:
+                # Second attempt: try to repair and parse
+                logger.warning(f"tool_input JSON parsing failed: {e}. Attempting repair...")
+                try:
+                    repaired = repair_json_string(parsed_dict["tool_input"])
+                    parsed_dict["tool_input"] = json.loads(repaired)
+                    logger.info(f"Successfully parsed repaired tool_input JSON string")
+                except json.JSONDecodeError as repair_error:
+                    raise ValueError(
+                        f"Invalid tool_input format: {parsed_dict['tool_input']}. "
+                        f"Original error: {e}. Repair attempt also failed: {repair_error}"
+                    )
         elif not isinstance(parsed_dict["tool_input"], dict):
             raise ValueError(f"tool_input must be a dictionary or valid JSON string, got: {type(parsed_dict['tool_input'])}")
-    
+
     return parsed_dict
 
 def parser(stream):
@@ -133,12 +199,24 @@ def parse_tool_input(tool_input:dict, fields):
         Extracts the value for a single field from the input data.
         Handles quoted values, JSON-like structures, unquoted key-value pairs, and boolean values.
         """
-        # Ensure `data` is in string format
+        # If data is already a dict, extract field directly
         if isinstance(data, dict):
-            try:
-                data = json.dumps(data)  # Serialize dictionary to a JSON string
-            except Exception:
-                pass
+            if field in data:
+                value = data[field]
+                # If value is a JSON string, try to parse it with repair
+                if isinstance(value, str) and (value.startswith('{') or value.startswith('[')):
+                    try:
+                        return json.loads(value)
+                    except json.JSONDecodeError:
+                        # Try to repair and parse
+                        try:
+                            repaired = repair_json_string(value)
+                            return json.loads(repaired)
+                        except json.JSONDecodeError:
+                            # Return as string if repair fails
+                            return value
+                return value
+            return None
 
         # If `data` is not a string at this point, return an error
         if not isinstance(data, str):
@@ -169,7 +247,20 @@ def parse_tool_input(tool_input:dict, fields):
                         return False
                     if (value.startswith('{') and value.endswith('}')) or (value.startswith('[') and value.endswith(']')):
                         try:
+                            print("CEHCKING FOR TOOL INPUT CORRECTNESS")
                             return json.loads(value)
+                        except json.JSONDecodeError:
+                            # Try to repair and parse
+                            try:
+                                repaired = repair_json_string(value)
+                                return json.loads(repaired)
+                            except json.JSONDecodeError:
+                                pass
+                    # Handle incomplete JSON objects/arrays (missing closing braces/brackets)
+                    elif value.startswith('{') or value.startswith('['):
+                        try:
+                            repaired = repair_json_string(value)
+                            return json.loads(repaired)
                         except json.JSONDecodeError:
                             pass
                     return value.strip("'\"")

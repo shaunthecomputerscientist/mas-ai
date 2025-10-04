@@ -1,11 +1,14 @@
 MAS/PRIVATE
 MAS/WORKSPACE
+MAS/tmp
+MAS/Wellness Models
 MAS/Database
 .env
+benosphere/**
+benosphere
 ~
 .qodo
 src/masai/Tools/tools
-src/masai/Services/
 project_example
 miscelleneous
 masai/etc
@@ -15,4 +18,5 @@ masai/Scripts
 masai/share
 masai/pyvenv.cfg
 test.py
+webtest.py
 __pycache__
