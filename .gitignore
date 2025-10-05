@@ -19,4 +19,5 @@ masai/share
 masai/pyvenv.cfg
 test.py
 webtest.py
+masai_server.py
 __pycache__

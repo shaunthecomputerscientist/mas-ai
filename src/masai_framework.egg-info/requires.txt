@@ -1,9 +1,7 @@
-langgraph==0.2.67
 langchain==0.3.15
 langchain-community==0.3.15
 langchain-core>=0.3.31
 pydantic>=2.0
-langchain-neo4j>=0.3.0
 python-dotenv
 huggingface-hub>=0.27.0
 tqdm
@@ -15,16 +13,11 @@ ollama>=0.4.4
 google-generativeai>=0.8.4
 langchain-groq>=0.2.3
 langchain-milvus>=0.1.8
-pymilvus>=2.5.4
-PyPDF2>=3.0.1
 langchain-openai>=0.3.2
 langchain-text-splitters>=0.3.5
 langsmith
-beautifulsoup4
 langchain-google-community>=2.0.4
-psycopg2-binary>=2.9.10
 tokenizers>=0.21.0
-neo4j
 langchain-google-genai>=2.0.9
 colorama>=0.4.6
 json-repair>=0.39.1

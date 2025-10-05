@@ -1,7 +1,14 @@
 import numpy as np
 import os
 from typing import List, Optional, Union, Callable
-from sentence_transformers import SentenceTransformer
+
+# Optional import for sentence transformers (heavy ML package)
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SentenceTransformer = None
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
 
 # Optional import for LangChain Document compatibility
 # try:
@@ -34,6 +41,11 @@ class InMemoryDocStore:
         self.embedding_model = None
         if embedding_model:
             if isinstance(embedding_model, str):
+                if not SENTENCE_TRANSFORMERS_AVAILABLE:
+                    raise ImportError(
+                        "sentence_transformers is not installed. "
+                        "Install it with: pip install sentence-transformers"
+                    )
                 self.embedding_model = SentenceTransformer(embedding_model)
             elif callable(embedding_model):
                 self.embedding_model = embedding_model

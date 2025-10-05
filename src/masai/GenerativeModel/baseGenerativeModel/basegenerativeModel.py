@@ -118,7 +118,7 @@ class BaseGenerativeModel:
                                 api_key=os.environ.get('GROQ_API_KEY'))
 
                 else:
-                    raise e
+                    raise ValueError(f"Unsupported category: {self.category}")
                 
                 # print(llm)
                 return llm

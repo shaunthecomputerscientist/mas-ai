@@ -1,7 +1,7 @@
 import asyncio # Ensure asyncio is imported
-from langgraph.graph import END, StateGraph, START
+from ..langgraph.graph import END, StateGraph, START
 from typing import List, Dict, Any, Literal, TypedDict, Tuple, Union, Type, Optional, Generator, AsyncGenerator, Callable # Ensure all types needed are imported
-from langgraph.graph.state import CompiledStateGraph
+from ..langgraph.graph.state import CompiledStateGraph
 # Import the modified BaseAgent and other dependencies
 from .base_agent import BaseAgent, State # Assuming BaseAgent is in base_agent.py
 from pydantic import BaseModel, Field, ValidationError
@@ -303,7 +303,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
 
     # --- Workflow Compilation (Overrides BaseAgent placeholder) ---
 
-    def agentworkflow(self) -> StateGraph:
+    def agentworkflow(self) -> CompiledStateGraph:
         """Compile the agent's workflow graph with async nodes."""
         workflow = StateGraph(State) # type: ignore
 

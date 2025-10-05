@@ -28,52 +28,26 @@
 
 MAS AI introduces two agent architectures optimized for different use cases:
 
-### 1. Router, Reflector, Evaluator
-A reactive architecture for dynamic task routing and output validation:
-
-![Router, Reflector, Evaluator](./MAS/Architecture/general.png)
-
-
-- **Router:** Analyzes queries and directs them to appropriate processing components
-- **Evaluator:** Reviews outputs to ensure quality and relevance
-- **Reflector:** Updates memory and improves routing strategies based on outcomes
-
-**Workflow:**
-1. Query received → Router analyzes
-2. Router delegates to appropriate components
-3. Components process the query
-4. Evaluator validates the output
-5. Reflector updates memory and strategies
-6. Return final output
-
-### 2. Planner, Executor, Reflector
-
-![Router, Reflector, Planner](./MAS/Architecture/planner.png)
-
-A proactive architecture for task planning and dependency management:
-
-- **Planner:** Breaks queries into structured task plans
-- **Executor:** Assigns tasks to appropriate components or agents
-- **Reflector:** Assesses results and adjusts plans as needed
-
-
 
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Framework Architecture](#framework-architecture)
-3. [Agent Components](#agent-components)
-4. [Memory System](#memory-system)
-5. [Multi-Agent Workflows](#multi-agent-workflows)
-6. [Parameter Reference](#parameter-reference)
-7. [Use Cases & Best Practices](#use-cases--best-practices)
-8. [Advanced Features](#advanced-features)
+3. [Custom LangGraph Implementation](#custom-langgraph-implementation)
+4. [Agent Components](#agent-components)
+5. [Memory System](#memory-system)
+6. [Multi-Agent Workflows](#multi-agent-workflows)
+7. [Parameter Reference](#parameter-reference)
+8. [Use Cases & Best Practices](#use-cases--best-practices)
+9. [Advanced Features](#advanced-features)
+10. [Installation & Setup](#installation--setup)
 
 ---
 
 ## Introduction
 
-**MAS-AI** (Multi-Agent System AI) is a modular framework for building intelligent agent systems using LangGraph. It provides:
+**MAS-AI** (Multi-Agent System AI) is a modular framework for building intelligent agent systems with a **custom LangGraph implementation**. It provides:
 
+- **Custom LangGraph Engine**: Built-in workflow execution engine with zero external dependencies
 - **Modular Agent Architecture**: Router, Evaluator, Reflector, Planner components
 - **Hierarchical Memory System**: Short-term, component-shared, long-term, and vector store memory
 - **Multiple Collaboration Patterns**: Sequential, Hierarchical, Decentralized workflows
@@ -171,6 +145,124 @@ MAS-AI stands apart from conventional multi-agent frameworks by offering:
 - Each MAS specializes in different domains
 - Network-level routing and memory
 - **Use when**: Enterprise-scale, multiple specialized systems, cross-domain coordination
+
+---
+
+## Custom LangGraph Implementation
+
+**MAS-AI** now includes a **custom LangGraph implementation** that provides all the functionality of the original LangGraph library while being fully integrated into the MASAI framework. This eliminates external dependencies and gives you complete control over the workflow execution engine.
+
+### Key Features
+
+- **🔧 Zero External Dependencies**: No need to install the external `langgraph` package
+- **⚡ Optimized Performance**: Custom implementation tailored for MASAI's specific needs
+- **🎯 Full Compatibility**: Drop-in replacement for existing LangGraph functionality
+- **🔍 Enhanced Debugging**: Better error messages and debugging capabilities
+- **🚀 Async-First Design**: Built from the ground up for async/await patterns
+
+### Core Components
+
+#### StateGraph
+The main graph building class that allows you to create complex workflows:
+
+```python
+from masai.langgraph.graph import StateGraph, END, START
+
+# Create a new state graph
+graph = StateGraph(YourStateType)
+
+# Add nodes (functions that process state)
+graph.add_node("router", router_function)
+graph.add_node("evaluator", evaluator_function)
+
+# Add edges between nodes
+graph.add_edge("router", "evaluator")
+
+# Add conditional edges based on state
+graph.add_conditional_edges("evaluator", condition_function, {
+    "continue": "router",
+    "end": END
+})
+
+# Set entry point and compile
+graph.set_entry_point("router")
+compiled_graph = graph.compile()
+```
+
+#### CompiledStateGraph
+The executable graph that runs your workflow:
+
+```python
+# Execute the entire workflow
+final_state = await compiled_graph.ainvoke(initial_state)
+
+# Stream state updates in real-time
+async for update in compiled_graph.astream(initial_state):
+    print(f"Node update: {update}")
+
+# Visualize the graph structure
+graph_viz = compiled_graph.get_graph()
+mermaid_diagram = graph_viz.get_mermaid_text()
+print(mermaid_diagram)
+
+# Generate PNG diagram (for display method compatibility)
+png_data = graph_viz.draw_mermaid_png()
+```
+
+### Migration from External LangGraph
+
+If you're migrating from the external LangGraph library, simply update your imports:
+
+```python
+# Old imports
+from langgraph.graph import StateGraph, END, START
+from langgraph.graph.state import CompiledStateGraph
+
+# New imports (MASAI custom implementation)
+from masai.langgraph.graph import StateGraph, END, START
+from masai.langgraph.graph.state import CompiledStateGraph
+```
+
+**No other code changes required!** The API is 100% compatible.
+
+### Graph Visualization
+
+The custom LangGraph implementation includes powerful visualization capabilities:
+
+```python
+# Create and compile your graph
+compiled_graph = graph.compile()
+
+# Get the visualization object
+graph_viz = compiled_graph.get_graph()
+
+# Generate Mermaid diagram text
+mermaid_text = graph_viz.get_mermaid_text()
+print(mermaid_text)
+
+# Generate PNG data (for compatibility with MASAI display method)
+png_data = graph_viz.draw_mermaid_png()
+
+# Save Mermaid diagram to file
+graph_viz.save_mermaid_text("my_workflow.mmd")
+```
+
+**MASAI Agent Display Method:**
+```python
+# Works exactly as before with custom implementation
+agent = Agent(...)
+agent.display()  # Saves PNG diagram to MAS/Database/mermaid/
+```
+
+### Advanced Features
+
+- **Graph Visualization**: Built-in Mermaid diagram generation with `get_graph()` and `draw_mermaid_png()`
+- **Async Condition Functions**: Support for both sync and async condition functions
+- **Flexible State Management**: Works with any TypedDict state structure
+- **Error Handling**: Comprehensive error messages for debugging
+- **Execution Statistics**: Built-in metrics for performance monitoring
+- **Recursion Protection**: Configurable limits to prevent infinite loops
+- **Display Method Compatibility**: Full compatibility with MASAI's `display()` method for agent visualization
 
 ---
 
@@ -1642,6 +1734,133 @@ MAS-AI provides a comprehensive framework for building intelligent multi-agent s
 
 ---
 
-**Last Updated**: 2025-01-04
-**Framework Version**: Based on MAS-AI v0.1.24
-**Documentation Version**: 2.0 (Comprehensive)
+## Installation & Setup
+
+### Prerequisites
+
+- Python 3.9 or higher
+- pip package manager
+
+### Installation Options
+
+#### Option 1: Install from PyPI (Recommended)
+
+```bash
+pip install masai-framework
+```
+
+#### Option 2: Install from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/shaunthecomputerscientist/mas-ai.git
+cd mas-ai
+
+# Install in development mode
+pip install -e .
+
+# Or install directly
+pip install .
+```
+
+### Quick Start
+
+1. **Create a model configuration file** (`model_config.json`):
+
+```json
+{
+  "router": {
+    "model_name": "gpt-4",
+    "temperature": 0.2,
+    "model_category": "openai"
+  },
+  "evaluator": {
+    "model_name": "gpt-3.5-turbo",
+    "temperature": 0.1,
+    "model_category": "openai"
+  },
+  "reflector": {
+    "model_name": "gpt-4",
+    "temperature": 0.7,
+    "model_category": "openai"
+  }
+}
+```
+
+2. **Set up environment variables**:
+
+```bash
+# For OpenAI
+export OPENAI_API_KEY="your-api-key"
+
+# For Gemini
+export GOOGLE_API_KEY="your-api-key"
+
+# For Anthropic
+export ANTHROPIC_API_KEY="your-api-key"
+```
+
+3. **Create your first agent**:
+
+```python
+from masai.AgentManager.AgentManager import AgentManager, AgentDetails
+from masai.Tools.tools.baseTools import human_in_loop_input
+
+# Initialize AgentManager
+manager = AgentManager(
+    context={"user_name": "Your Name"},
+    logging=True,
+    model_config_path="model_config.json"
+)
+
+# Define agent capabilities
+agent_details = AgentDetails(
+    capabilities=["reasoning", "analysis", "problem-solving"],
+    description="A helpful AI assistant",
+    style="friendly and informative"
+)
+
+# Create an agent
+manager.create_agent(
+    agent_name="assistant",
+    tools=[human_in_loop_input],
+    agent_details=agent_details
+)
+
+# Use the agent
+response = await manager.get_agent("assistant").initiate_agent("Hello, how can you help me?")
+print(response["answer"])
+```
+
+### Verification
+
+Test your installation:
+
+```python
+# Test custom LangGraph implementation
+from masai.langgraph.graph import StateGraph, END, START
+from masai.langgraph.graph.state import CompiledStateGraph
+
+print("✅ MASAI Framework installed successfully!")
+print("✅ Custom LangGraph implementation ready!")
+```
+
+### Troubleshooting
+
+**Common Issues:**
+
+1. **Import Errors**: Make sure you're using Python 3.9+ and have installed all dependencies
+2. **API Key Issues**: Verify your API keys are set correctly in environment variables
+3. **Model Configuration**: Ensure your `model_config.json` file is properly formatted
+
+**Getting Help:**
+
+- 📖 Check the [documentation](https://github.com/shaunthecomputerscientist/mas-ai)
+- 🐛 Report issues on [GitHub Issues](https://github.com/shaunthecomputerscientist/mas-ai/issues)
+- 💬 Join our community discussions
+
+---
+
+**Last Updated**: 2025-01-05
+**Framework Version**: v0.1.33 with Custom LangGraph + Visualization
+**Documentation Version**: 2.2 (Complete Custom LangGraph with Graph Visualization)

@@ -113,7 +113,7 @@ class MASGenerativeModel(BaseGenerativeModel):
             category=category,
             memory_order=memory_order,
             prompt_template=prompt_template,
-            info=extra_context
+            info=extra_context if extra_context else {'USEFUL DATA': 'None'}
         )
 
         self.category = category

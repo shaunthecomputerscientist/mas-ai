@@ -1,7 +1,6 @@
 import redis
 import functools
 import pickle
-from langchain.tools import tool  # Importing the @tool decorator
 
 class ToolCache:
     def __init__(self, host='localhost', port=6379, db=0, password=None, timeout:int = 30):

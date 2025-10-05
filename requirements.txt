@@ -1,24 +1,26 @@
+# MASAI Requirements - OPTIMIZED FOR DISK SPACE
+# Heavy dependencies removed to save disk space and reduce installation time
+# Install additional packages only when needed for specific features
+
 # Core LangChain and Related Libraries
-langgraph==0.2.67
+# langgraph==0.2.67  # REMOVED - Replaced with custom implementation in src/masai/langgraph/
 langchain==0.3.15  # Main LangChain package, pulls langchain-core, langchain-text-splitters
 langchain-community==0.3.15  # Community extensions, pulls additional tools
-langchain-experimental  # Experimental features
+langchain-experimental  # REMOVED - Not used by MASAI
 langchain-google-genai  # Google Generative AI integration
 langchain-groq>=0.2.3  # Groq integration
 langchain-openai>=0.3.2  # OpenAI integration
-langchain_neo4j>=0.3.0  # Neo4j integration
-langchain-milvus  # Milvus integration
+# langchain_neo4j>=0.3.0  # REMOVED - Only needed if using Neo4j with LangChain
+# langchain-milvus  # REMOVED - Only needed if using Milvus with LangChain
 langchain_huggingface>=0.1.2
-langchain-google-community>=2.0.4
-
+langchain-google-community>=2.0.4  # REMOVED - Redundant with langchain-google-genai
 
 # AI/ML and Text Processing
 google-generativeai>=0.8.4  # Google AI SDK
 openai>=1.60.0  # OpenAI SDK
 anthropic>=0.34.2  # Anthropic SDK
 groq>=0.13.1  # Groq SDK
-sentence-transformers>=3.4.0  # Embeddings
-
+sentence-transformers>=3.4.0  # REMOVED - Very heavy ML package, install only if using embeddings
 
 # Search and Web APIs
 beautifulsoup4  # HTML parsing
@@ -26,25 +28,24 @@ beautifulsoup4  # HTML parsing
 # Local Models and Inference
 ollama>=0.4.4  # Ollama for local model inference
 
-# Database and Utilities
-psycopg2-binary  # PostgreSQL driver (optional unless directly used)
+# Database and Utilities - OPTIMIZED
+psycopg2-binary  # REMOVED - PostgreSQL driver, only install if using PostgreSQL
 PyPDF2  # PDF processing
 python-dotenv  # Environment variables
-PyAutoGUI  # GUI automation
+PyAutoGUI  # REMOVED - GUI automation, not needed for core MASAI functionality
 pydantic  # Data validation
 tenacity # Retry logic
 tqdm  # Progress bars
 tiktoken  # Tokenization for OpenAI models
 
-#utilities
+# utilities
 json_repair
 redis>=5.2.1
 numpy
 colorama>=0.4.6
 aiofiles>=24.1.0
 
-#tools and utilities
-
+# tools and utilities
 duckduckgo-search  # Search tool
 wikipedia  # Wikipedia API
 arxiv  # Arxiv API
@@ -52,20 +53,20 @@ tavily-python>=0.5.0  # Tavily search
 youtube-transcript-api>=0.6.3  # YouTube transcripts
 google-api-python-client>=2.159.0  # Google APIs (e.g., YouTube Data API, Custom Search)
 nylas>=6.7.0  # Nylas API for email, calendar, contacts
-transformers>=4.48.1  # Hugging Face transformers
-spacy # NLP tools
-rank-bm25 # BM25 ranking algorithm
+transformers>=4.48.1  # REMOVED - Very heavy ML package, install only if using HF models
+spacy  # REMOVED - Heavy NLP package, install only if using advanced NLP
+rank-bm25 # BM25 ranking algorithm - KEEP (lightweight and useful)
 
-# Graph and Vector Databases
-neo4j>=5.28.1  # Neo4j driver
-pymilvus>=2.4.8  # Milvus client for vector database
-chromadb>=0.6.3  # Chroma vector DB
-langchain-pinecone>=0.2.3 #pinecone vectordb.
-networkx>=3.4.2  # Graph manipulation
-PyMuPDF>=1.25.5
+# Graph and Vector Databases - OPTIMIZED
+neo4j>=5.28.1  # REMOVED - Heavy Neo4j driver, install only if using Neo4j
+pymilvus>=2.4.8  # REMOVED - Heavy Milvus client, install only if using Milvus
+chromadb>=0.6.3  # REMOVED - Heavy Chroma vector DB, install only if using Chroma
+langchain-pinecone>=0.2.3  # REMOVED - Pinecone integration, install only if using Pinecone
+networkx>=3.4.2  # Graph manipulation - KEEP (lightweight and useful)
+PyMuPDF>=1.25.5  # PDF processing - KEEP (useful for document processing)
 
-# Visualization
-pythreejs  # 3D visualization
-PyQt5  # GUI for standalone pythreejs visualization
-matplotlib  # Static plotting
-seaborn  # Enhanced visualization
+# Visualization - OPTIMIZED FOR DISK SPACE
+pythreejs  # REMOVED - Heavy 3D visualization, not essential for MASAI
+PyQt5  # REMOVED - Heavy GUI framework, not needed for core functionality
+matplotlib  # REMOVED - Heavy plotting library, can be installed separately if needed
+seaborn  # REMOVED - Depends on matplotlib, not essential for MASAI core

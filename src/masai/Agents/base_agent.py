@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 from ..GenerativeModel.baseGenerativeModel.basegenerativeModel import BaseGenerativeModel
 from ..Tools.logging_setup.logger import setup_logger
 from ..Tools.PARSERs.json_parser import parse_tool_input, parse_task_string
-from langgraph.graph import StateGraph # Only StateGraph needed here usually
+from ..langgraph.graph import StateGraph
+from ..langgraph.graph.state import CompiledStateGraph
 import inspect
 
 load_dotenv()
@@ -212,7 +213,7 @@ class BaseAgent:
         """Initiate the agent workflow asynchronously (to be overridden by subclasses)."""
         raise NotImplementedError("Subclasses must implement async initiate_agent")
 
-    def agentworkflow(self) -> StateGraph:
+    def agentworkflow(self) -> CompiledStateGraph:
         """Compile and return the agent's workflow graph (to be overridden by subclasses)."""
         raise NotImplementedError("Subclasses must implement agentworkflow")
 
