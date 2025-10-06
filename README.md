@@ -23,8 +23,9 @@
 
 |                                     |
 |:-----------------------------------:|
+|![SageFlow Shoutout](/MAS/Logo/sageflow_masai.jpg)|
 
-![SageFlow Shoutout](/MAS/Logo/sageflow_masai.jpg)|## Agent Architecture
+## Agent Architecture
 
 MAS AI introduces two agent architectures optimized for different use cases:
 
@@ -66,6 +67,21 @@ MAS-AI stands apart from conventional multi-agent frameworks by offering:
 ---
 
 ## Framework Architecture
+
+### Agent Control Flow
+
+The MASAI framework follows a sophisticated control flow pattern where agents process queries through multiple specialized nodes. The detailed workflow diagrams are shown in the architecture sections below.
+
+**Key Control Flow Rules:**
+
+1. **Entry Point**: Router (default) or Planner (if planning enabled)
+2. **Conditional Edges**: ALL nodes use `checkroutingcondition()` to decide next step
+3. **Routing Logic**:
+   - `"continue"` → Execute tool (router/planner) or Evaluate (execute_tool) or Execute again (evaluator/reflector)
+   - `"reflection"` → Reflect and improve
+   - `"end"` → Terminate workflow
+4. **Return Direct**: Tools with `return_direct=True` cause `execute_tool` to go directly to `END`
+5. **Loop Control**: Continues until `satisfied=True` and `current_tool=""` or max iterations reached
 
 ### Core Components
 
@@ -273,8 +289,28 @@ MAS AI introduces two agent architectures optimized for different use cases:
 ### 1. Router, Reflector, Evaluator
 A reactive architecture for dynamic task routing and output validation:
 
-![Router, Reflector, Evaluator](./MAS/Architecture/general.png)
-
+```mermaid
+graph TD
+    START --> router
+    router -->|continue| execute_tool
+    router -->|reflection| reflection
+    router -->|end| END
+    execute_tool -->|continue| evaluator
+    execute_tool -->|reflection| reflection
+    execute_tool -->|end| END
+    evaluator -->|continue| execute_tool
+    evaluator -->|reflection| reflection
+    evaluator -->|end| END
+    reflection -->|continue| execute_tool
+    reflection -->|reflection| reflection
+    reflection -->|end| END
+    evaluator[evaluator]
+    reflection[reflection]
+    execute_tool[execute_tool]
+    router[router]
+    START([START])
+    END([END])
+```
 
 - **Router:** Analyzes queries and directs them to appropriate processing components
 - **Evaluator:** Reviews outputs to ensure quality and relevance
@@ -282,7 +318,28 @@ A reactive architecture for dynamic task routing and output validation:
 
 ### 2. Planner, Executor, Reflector
 
-![Router, Reflector, Planner](./MAS/Architecture/planner.png)
+```mermaid
+graph TD
+    START --> planner
+    planner -->|continue| execute_tool
+    planner -->|reflection| reflection
+    planner -->|end| END
+    execute_tool -->|continue| evaluator
+    execute_tool -->|reflection| reflection
+    execute_tool -->|end| END
+    evaluator -->|continue| execute_tool
+    evaluator -->|reflection| reflection
+    evaluator -->|end| END
+    reflection -->|continue| execute_tool
+    reflection -->|reflection| reflection
+    reflection -->|end| END
+    evaluator[evaluator]
+    reflection[reflection]
+    execute_tool[execute_tool]
+    planner[planner]
+    START([START])
+    END([END])
+```
 
 A proactive architecture for task planning and dependency management:
 

@@ -75,8 +75,8 @@ class GraphVisualization:
 
         # Add conditional edges
         for from_node, config in self.conditional_edges.items():
-            condition_func = config.get('condition')
-            mapping = config.get('mapping', {})
+            condition_func = config.get('condition_func')
+            mapping = config.get('condition_map', {})
 
             for condition_result, target_node in mapping.items():
                 if target_node == END:

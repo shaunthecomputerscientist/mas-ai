@@ -1,0 +1,20 @@
+graph TD
+    START --> router
+    router -->|continue| execute_tool
+    router -->|reflection| reflection
+    router -->|end| END
+    execute_tool -->|continue| evaluator
+    execute_tool -->|reflection| reflection
+    execute_tool -->|end| END
+    evaluator -->|continue| execute_tool
+    evaluator -->|reflection| reflection
+    evaluator -->|end| END
+    reflection -->|continue| execute_tool
+    reflection -->|reflection| reflection
+    reflection -->|end| END
+    evaluator[evaluator]
+    reflection[reflection]
+    execute_tool[execute_tool]
+    router[router]
+    START([START])
+    END([END])

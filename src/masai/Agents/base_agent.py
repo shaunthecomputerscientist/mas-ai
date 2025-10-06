@@ -30,6 +30,7 @@ class State(TypedDict):
     passed_from: Optional[str] # Mark as Optional
     reflection_counter: int # Defaults set in Agent's initial_state
     tool_loop_counter: int # Defaults set in Agent's initial_state
+    tool_decided_by: Optional[str] # Track which node decided to use the current tool
 
 class BaseAgent:
     _logger = None
@@ -116,11 +117,13 @@ class BaseAgent:
         tool_input_raw = parsed_response.get('tool_input') # Assumes LLM returns 'tool_input'
 
         # Update previous/current node first
-        current_state['previous_node'] = current_state.get('current_node', None) # Record previous before overwrite
-        current_state['current_node'] = node
+        current_state['previous_node'] = node # The node we're entering
+        current_state['current_node'] = None  # Reset current
 
         if tool_name and tool_name not in ["None", None]:
             current_state["current_tool"] = tool_name
+            # Track which node decided to use this tool (for component context)
+            current_state["tool_decided_by"] = node
             # Parse tool input safely
             parsed_tool_input = await self.gettoolinput(tool_input_raw, tool_name)
 
@@ -145,6 +148,7 @@ class BaseAgent:
              # Clear tool info if no tool selected by LLM
              current_state["current_tool"] = None
              current_state["tool_input"] = None
+             current_state["tool_decided_by"] = None  # Clear decision maker
              current_state['tool_loop_counter'] = 0 # Reset counter if no tool
 
 
@@ -233,7 +237,6 @@ class BaseAgent:
         tool_name = state.get("current_tool")
         tool_input = state.get("tool_input")
 
-        state['previous_node'] = state.get('current_node')
         state['current_node'] = 'execute_tool'
 
         if not tool_name or tool_name == "None":
@@ -242,6 +245,10 @@ class BaseAgent:
             state['tool_output'] = "No tool to execute."
             if "messages" not in state: state["messages"] = []
             state["messages"].append({"role": "tool", "name": "system", "content": "No tool to execute."})
+
+            # Manual state update for early return
+            state['previous_node'] = 'execute_tool'
+            state['current_node'] = None
             return state
 
 
@@ -250,8 +257,13 @@ class BaseAgent:
             if self.logger: self.logger.error(f"Tool '{tool_name}' not found in tool_mapping.")
             state['tool_output'] = f"Error: Tool '{tool_name}' not found."
             state['satisfied'] = False
+            state['current_tool'] = None  # Clear invalid tool to prevent infinite loop
             if "messages" not in state: state["messages"] = []
             state["messages"].append({"role": "tool", "name": tool_name, "content": state['tool_output']})
+
+            # Manual state update for early return
+            state['previous_node'] = 'execute_tool'
+            state['current_node'] = None
             return state
 
 
@@ -360,7 +372,7 @@ class BaseAgent:
         state['passed_from'] = tool_name
         state["messages"].append({"role": "tool", "name": tool_name, "content": state['tool_output']})
 
-        if hasattr(tool, 'return_direct') and tool.return_direct and state.get('satisfied', True):
+        if hasattr(tool, 'return_direct') and tool.return_direct:
              if self.logger: self.logger.warning(f"Tool '{tool_name}' requested return_direct. Setting final answer.")
              state.update({
                  'current_tool': None, 'tool_input': None, 'answer': state['tool_output'],
@@ -370,4 +382,7 @@ class BaseAgent:
         elif 'satisfied' not in state:
              state['satisfied'] = False
 
+        # Manual state update to be consistent with other nodes (don't use _update_state as it expects LLM response)
+        state['previous_node'] = 'execute_tool'
+        state['current_node'] = None
         return state

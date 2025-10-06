@@ -213,6 +213,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
 
     async def router(self, state: State) -> State:
         """Route the query to a tool or delegate asynchronously."""
+        state['current_node'] = 'router'
         if self.logger: self.logger.info("--- Entering Router Node (Async) ---")
         prev_node = state.get('previous_node')
         # Simple context fetching (consider refining based on actual needs)
@@ -230,6 +231,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
 
     async def evaluator(self, state: State) -> State:
         """Evaluate tool output asynchronously."""
+        state['current_node'] = 'evaluator'
         if self.logger: self.logger.info("--- Entering Evaluator Node (Async) ---")
         prev_node = state.get('previous_node')
         component_context = []
@@ -237,20 +239,24 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
         # Or from the tool execution itself (passed via state['tool_output'])
         # Let's primarily use context from router/planner/reflector that *led* to the tool call
         if prev_node == 'execute_tool':
-             # Find node before execute_tool
-             messages = state.get('messages', [])
-             tool_node_index = -1
-             # Find the last tool message index
-             for i in range(len(messages) - 1, -1, -1):
-                 if messages[i].get("role") == "tool":
-                     tool_node_index = i
-                     break
-             if self.llm_router: component_context = self.llm_router.chat_history[-self.shared_memory_order:]
-             elif self.llm_planner: component_context = self.llm_planner.chat_history[-self.shared_memory_order:]
+             # Use context from the node that actually decided to use the tool
+             # Tool output is already included in the prompt via {tool_output}
+             tool_decided_by = state.get('tool_decided_by')
+             if tool_decided_by == 'router' and self.llm_router:
+                 component_context = self.llm_router.chat_history[-self.shared_memory_order:]
+             elif tool_decided_by == 'reflector' and self.llm_reflector:
+                 component_context = self.llm_reflector.chat_history[-self.shared_memory_order:]
+
+             # Fallback to router/planner if tool_decided_by is not set (backward compatibility)
+             elif not tool_decided_by:
+                 if self.llm_router: component_context = self.llm_router.chat_history[-self.shared_memory_order:]
+                 elif self.llm_planner: component_context = self.llm_planner.chat_history[-self.shared_memory_order:]
 
         elif prev_node == 'reflector' and self.llm_reflector: component_context = self.llm_reflector.chat_history[-self.shared_memory_order:]
         elif prev_node == 'router' and self.llm_router: component_context = self.llm_router.chat_history[-self.shared_memory_order:]
         elif prev_node == 'planner' and self.llm_planner: component_context = self.llm_planner.chat_history[-self.shared_memory_order:]
+        else:
+            component_context = state.get('messages', [])[-self.shared_memory_order:]
 
 
         prompt = await self._format_node_prompt(state=state, node='evaluator')
@@ -258,6 +264,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
 
     async def reflection(self, state: State) -> State:
         """Reflect on progress and generate a final answer asynchronously."""
+        state['current_node'] = 'reflector'
         if self.logger: self.logger.info(f"--- Entering Reflection Node (Async) #{state.get('reflection_counter', 0) + 1} ---")
 
         # Increment reflection counter - handled by _update_state now? No, _update_state doesn't increment reflection counter. Do it here.
@@ -265,12 +272,20 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
 
         prev_node = state.get('previous_node')
         component_context = []
-        # Gather context from relevant previous steps
+        # Gather context from relevant pr4evious steps
         if prev_node == 'router' and self.llm_router: component_context = self.llm_router.chat_history[-self.shared_memory_order:]
         elif prev_node == 'evaluator' and self.llm_evaluator: component_context = self.llm_evaluator.chat_history[-self.shared_memory_order:]
         elif prev_node == 'planner' and self.llm_planner: component_context = self.llm_planner.chat_history[-self.shared_memory_order:]
-        elif prev_node == 'execute_tool': # Reflecting after a tool failed evaluation
-            if self.llm_evaluator: component_context = self.llm_evaluator.chat_history[-self.shared_memory_order:]
+        elif prev_node == 'execute_tool':
+             # Use context from the node that actually decided to use the tool
+             # Tool output is already included in the prompt via {tool_output}
+             tool_decided_by = state.get('tool_decided_by')
+             if tool_decided_by == 'router' and self.llm_router:
+                 component_context = self.llm_router.chat_history[-self.shared_memory_order:]
+             elif tool_decided_by == 'evaluator' and self.llm_evaluator:
+                 component_context = self.llm_evaluator.chat_history[-self.shared_memory_order:]
+        else:
+            component_context = state.get('messages', [])[-self.shared_memory_order:]
 
 
         prompt = await self._format_node_prompt(state=state, node='reflector')
@@ -281,6 +296,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
 
     async def planner(self, state: State) -> State:
         """Plan tasks for complex queries asynchronously."""
+        state['current_node'] = 'planner'
         if self.logger: self.logger.info("--- Entering Planner Node (Async) ---")
         prev_node = state.get('previous_node')
         component_context = [] # Planner usually starts fresh or gets context from reflection if replanning
@@ -336,8 +352,12 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
 
         # --- Edges from intermediate nodes ---
 
-        # After executing a tool, always evaluate the result
-        workflow.add_edge("execute_tool", "evaluator")
+        # After executing a tool, decide next step (evaluator or end if return_direct)
+        workflow.add_conditional_edges("execute_tool", self.checkroutingcondition, {
+            "continue": "evaluator",  # Normal case: evaluate tool output
+            "reflection": "reflection",  # Tool execution suggests reflection needed
+            "end": END  # Tool has return_direct=True, go directly to end
+        })
 
         # After evaluating, decide next step based on satisfaction and tool needs
         workflow.add_conditional_edges("evaluator", self.checkroutingcondition, {
@@ -382,7 +402,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
             satisfied=False, reasoning="", delegate_to_agent=None,
             current_node='planner' if self.plan else 'router',
             previous_node=previous_node, plan={}, passed_from=passed_from,
-            reflection_counter=0, tool_loop_counter=0
+            reflection_counter=0, tool_loop_counter=0, tool_decided_by=None
         )
         configuration = {"recursion_limit": config.MAX_RECURSION_LIMIT}
         
@@ -428,7 +448,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
             current_tool="", tool_input=None, tool_output="", answer="",
             satisfied=False, reasoning="", delegate_to_agent=None,
             current_node='planner' if self.plan else 'router',previous_node=previous_node, plan={}, passed_from=passed_from,
-        reflection_counter=0, tool_loop_counter=0)
+        reflection_counter=0, tool_loop_counter=0, tool_decided_by=None)
         configuration = {"recursion_limit": config.MAX_RECURSION_LIMIT}
     
         try:

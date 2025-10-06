@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "masai_framework"
-version = "0.1.35"  # Complete custom LangGraph with visualization
+version = "0.1.4"  # Complete custom LangGraph with visualization
 authors = [{ name = "PILER", email = "mrpolymathematica@gmail.com" }]
 description = "Multi-Agent System Framework for AI Agents with Custom LangGraph Implementation"
 readme = "README.md"
@@ -24,7 +24,6 @@ dependencies = [
     "ollama>=0.4.4",
     "google-generativeai>=0.8.4",
     "langchain-groq>=0.2.3",
-    "langchain-milvus>=0.1.8",
     "langchain-openai>=0.3.2",
     "langchain-text-splitters>=0.3.5",
     "langsmith",
