@@ -77,11 +77,30 @@ class BaseGenerativeModel:
     def _get_llm(self):
             try:
                 if "gemini" in self.category:
+                    # Gemini 2.5 models have built-in thinking capability
+                    # Check if this is a thinking-capable model
+                    is_thinking_model = (
+                        self.model_name.startswith('gemini-2.5') or
+                        'thinking' in self.model_name.lower()         # Experimental thinking models
+                    )
+
+                    model_kwargs = {}
+                    if is_thinking_model:
+                        # Map temperature to thinking budget for reasoning models
+                        # Low temp = focused thinking, high temp = exploratory thinking
+                        if self.temperature <= 0.3:
+                            model_kwargs["thinkingBudget"] = "low"
+                        elif self.temperature <= 0.7:
+                            model_kwargs["thinkingBudget"] = "medium"
+                        else:
+                            model_kwargs["thinkingBudget"] = "high"
+
                     llm = ChatGoogleGenerativeAI(
                         api_key=os.environ.get('GOOGLE_API_KEY'),
                         verbose=True,
                         model=self.model_name,
-                        temperature=self.temperature
+                        temperature=self.temperature,
+                        model_kwargs=model_kwargs if model_kwargs else None
                     )
                 elif "huggingface" in self.category:
                     llm = ChatHuggingFace(
@@ -92,16 +111,68 @@ class BaseGenerativeModel:
 
                     )
                 elif "openai" in self.category:
-                    llm = ChatOpenAI(
-                        model=self.model_name,
-                        temperature=self.temperature,
-                        api_key=os.environ.get('OPENAI_API_KEY')
+                    # Reasoning models don't support temperature parameter
+                    # Check if this is a reasoning model (GPT-5, o-series, GPT-4.1)
+                    is_reasoning_model = (
+                        self.model_name.startswith('gpt-5') or      # GPT-5 series
+                        self.model_name.startswith('o1') or         # o1, o1-mini, o1-preview
+                        self.model_name.startswith('o3') or         # o3, o3-mini
+                        self.model_name.startswith('o4') or         # o4-mini
+                        self.model_name.startswith('gpt-4.1')       # GPT-4.1, gpt-4.1-nano
                     )
-                elif "antrophic" in self.category:
+
+                    if is_reasoning_model:
+                        # Reasoning models use reasoning_effort instead of temperature
+                        # Map temperature to reasoning_effort: 0-0.3=low, 0.4-0.7=medium, 0.8+=high
+                        if self.temperature <= 0.3:
+                            reasoning_effort = "low"
+                        elif self.temperature <= 0.7:
+                            reasoning_effort = "medium"
+                        else:
+                            reasoning_effort = "high"
+
+                        # Note: reasoning_effort should be passed via model_kwargs
+                        # Some models may not support this parameter yet
+                        llm = ChatOpenAI(
+                            model=self.model_name,
+                            model_kwargs={"reasoning_effort": reasoning_effort},
+                            api_key=os.environ.get('OPENAI_API_KEY')
+                        )
+                    else:
+                        # GPT-4o and earlier models support temperature
+                        llm = ChatOpenAI(
+                            model=self.model_name,
+                            temperature=self.temperature,
+                            api_key=os.environ.get('OPENAI_API_KEY')
+                        )
+                elif "antrophic" in self.category or "anthropic" in self.category:
+                    # Check if this is a thinking/reasoning model
+                    is_thinking_model = (
+                        self.model_name.startswith('claude-4') or
+                        self.model_name.startswith('claude-3.7')
+                    )
+
+                    model_kwargs = {}
+                    if is_thinking_model:
+                        # Enable extended thinking for Claude 4 and 3.7 models
+                        # Map temperature to thinking budget tokens
+                        if self.temperature <= 0.3:
+                            budget_tokens = 5000  # Focused thinking
+                        elif self.temperature <= 0.7:
+                            budget_tokens = 10000  # Balanced thinking
+                        else:
+                            budget_tokens = 20000  # Deep thinking
+
+                        model_kwargs["thinking"] = {
+                            "type": "enabled",
+                            "budget_tokens": budget_tokens
+                        }
+
                     llm = ChatAnthropic(
                         model_name=self.model_name,
                         temperature=self.temperature,
-                        anthropic_api_key=os.environ.get('ANTHROPIC_API_KEY')
+                        anthropic_api_key=os.environ.get('ANTHROPIC_API_KEY'),
+                        model_kwargs=model_kwargs if model_kwargs else None
                     )
                 elif "ollama" in self.category:
                     llm = ChatOllama(
@@ -158,7 +229,8 @@ class BaseGenerativeModel:
             return response
 
         # Structured output
-        structured_llm = self.model.with_structured_output(output_structure)
+        # Use json_mode for OpenAI and Gemini for better reliability and compatibility
+        structured_llm = self._return_structured_model(prompt, output_structure)
         
         # Mandatory variables that should always be present
         mandatory_vars = ['question', 'useful_info', 'current_time', 'history', 'schema']
@@ -215,6 +287,14 @@ class BaseGenerativeModel:
         if self.memory:
             self.chat_history.append({'role': 'assistant', 'content': response})
         return response
+    
+    def _return_structured_model(self, prompt: str, output_structure: Type[BaseModel]):
+        # Use json_mode for OpenAI and Gemini for better reliability and compatibility
+        if self.category.lower() in ["openai"]:
+            structured_llm = self.model.with_structured_output(output_structure, method="json_mode")
+        else:
+            structured_llm = self.model.with_structured_output(output_structure)
+        return structured_llm
     
     async def astream_response(self, prompt: str, custom_inputs: Optional[dict] = None) -> AsyncGenerator[str, None]:
         """

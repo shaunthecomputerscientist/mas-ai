@@ -7,7 +7,10 @@ logger = logging.getLogger(__name__)
 
 def repair_json_string(json_str: str) -> str:
     """
-    Attempt to repair common JSON string issues by adding missing closing brackets/braces.
+    Attempt to repair common JSON string issues:
+    1. Invalid escape sequences (\' which is not valid JSON)
+    2. Missing closing brackets/braces
+
     Uses a stack-based approach to determine the correct order of closing characters.
 
     Args:
@@ -19,7 +22,16 @@ def repair_json_string(json_str: str) -> str:
     # Remove leading/trailing whitespace
     json_str = json_str.strip()
 
-    # Use a stack to track opening brackets/braces and determine what's missing
+    repairs_made = []
+
+    # Fix 1: Replace invalid escape sequences
+    # \' is not a valid JSON escape sequence (only \" \\ \/ \b \f \n \r \t \uXXXX are valid)
+    # LLMs often generate \' when they confuse Python escaping with JSON escaping
+    if "\\'" in json_str:
+        json_str = json_str.replace("\\'", "'")
+        repairs_made.append("replaced \\' with '")
+
+    # Fix 2: Use a stack to track opening brackets/braces and determine what's missing
     stack = []
     for char in json_str:
         if char in ('{', '['):
@@ -41,9 +53,11 @@ def repair_json_string(json_str: str) -> str:
             elif open_char == '[':
                 closing_chars.append(']')
 
-        repaired = json_str + ''.join(closing_chars)
-        logger.warning(f"Repaired JSON string by adding {len(closing_chars)} closing character(s): {''.join(closing_chars)}")
-        return repaired
+        json_str = json_str + ''.join(closing_chars)
+        repairs_made.append(f"added {len(closing_chars)} closing character(s): {''.join(closing_chars)}")
+
+    if repairs_made:
+        logger.warning(f"Repaired JSON string: {'; '.join(repairs_made)}")
 
     return json_str
 
@@ -148,11 +162,15 @@ def parse_tool_input(tool_input:dict, fields):
     Parses `tool_input` according to the provided fields, handling various formats and edge cases.
 
     Parameters:
-    text (str or dict): The input to parse. It can be a dictionary, a JSON-like string, or a raw string.
+    tool_input (str or dict): The input to parse. It can be a dictionary, a JSON-like string, or a raw string.
     fields (list): List of field names to extract.
 
     Returns:
     dict: A dictionary containing the parsed data for the specified fields.
+
+    Flow:
+    1. If tool_input is already a dict → Direct field extraction (fast path)
+    2. If tool_input is a string → Try to parse as JSON first, then fall back to regex
     """
 
     def clean_text(text):
@@ -223,14 +241,25 @@ def parse_tool_input(tool_input:dict, fields):
             return None
 
         # Define patterns to match different value formats
+        # Note: These patterns are fallback for when JSON parsing fails
+        # The optimized flow tries JSON parsing first (which handles all cases correctly)
         patterns = [
-            rf'"{field}"\s*:\s*"((?:[^"\\]|\\.)*)"',    # Double-quoted value
-            rf"'{field}'\s*:\s*'((?:[^'\\]|\\.)*)'",    # Single-quoted value
-            rf'"{field}"\s*:\s*(\{{[^}}]*\}})',         # JSON-like dictionary
-            rf'"{field}"\s*:\s*(\[[^\]]*\])',           # JSON-like list
+            # Python-style key=value patterns (for LLM-generated tool inputs)
+            rf'{field}\s*=\s*"""(.*?)"""',              # Triple double-quoted value (Python docstring style)
+            rf"{field}\s*=\s*'''(.*?)'''",              # Triple single-quoted value (Python docstring style)
+            rf'{field}\s*=\s*"((?:[^"\\]|\\.)*)"',      # Double-quoted value (Python style)
+            rf"{field}\s*=\s*'((?:[^'\\]|\\.)*)'",      # Single-quoted value (Python style)
+
+            # JSON-style key:value patterns (standard)
+            # Use non-greedy matching with proper escape handling
+            rf'"{field}"\s*:\s*"((?:[^"\\]|\\.)*)"\s*[,}}\]]',    # Double-quoted value (handles escaped quotes, stops at comma/brace/bracket)
+            rf"'{field}'\s*:\s*'((?:[^'\\]|\\.)*)'\s*[,}}\]]",    # Single-quoted value (handles escaped quotes, stops at comma/brace/bracket)
+            rf'"{field}"\s*:\s*(\{{[^}}]*\}})',         # JSON-like dictionary (simple, no nesting)
+            rf'"{field}"\s*:\s*(\[[^\]]*\])',           # JSON-like list (simple, no nesting)
             rf'"{field}"\s*:\s*(true|false)',           # Boolean values (JSON-style)
-            rf'"{field}"\s*:\s*(\d+)',                  # Match only numbers
-            rf'"{field}"\s*:\s*([^\s,]+)'               # Unquoted value (general case)
+            rf'"{field}"\s*:\s*(null)',                 # Null values (JSON-style)
+            rf'"{field}"\s*:\s*(\d+\.?\d*)',            # Numbers (int or float)
+            rf'"{field}"\s*:\s*([^\s,\}}]+)'            # Unquoted value (general case, stops at comma or brace)
         ]
 
         # Apply patterns to extract the value
@@ -240,11 +269,13 @@ def parse_tool_input(tool_input:dict, fields):
                 value = next((g for g in match.groups() if g is not None), None)
                 # print(match,value)
                 if value:
-                    # Convert JSON boolean values to Python booleans
-                    if 'true' in value.lower():
+                    # Convert JSON values to Python equivalents (EXACT match only, not substring)
+                    if value.lower() == 'true':
                         return True
-                    if 'false' in value.lower():
+                    if value.lower() == 'false':
                         return False
+                    if value.lower() == 'null':
+                        return None
                     if (value.startswith('{') and value.endswith('}')) or (value.startswith('[') and value.endswith(']')):
                         try:
                             print("CEHCKING FOR TOOL INPUT CORRECTNESS")
@@ -280,10 +311,29 @@ def parse_tool_input(tool_input:dict, fields):
                 # print(field)
                 result[field] = None
         return result
-        
+
+    # OPTIMIZATION: If tool_input is a string, try to parse it as JSON first
+    # This converts it to a dict, which uses the fast path in extract_field_value
+    if isinstance(tool_input, str):
+        try:
+            # Try direct JSON parsing
+            tool_input = json.loads(tool_input)
+            logger.info("Successfully parsed tool_input string as JSON")
+        except json.JSONDecodeError:
+            
+            # Try with repair
+            try:
+                repaired = repair_json_string(tool_input)
+                tool_input = json.loads(repaired)
+                logger.info("Successfully parsed repaired tool_input string as JSON")
+            except json.JSONDecodeError:
+                # Fall back to regex extraction (original behavior)
+                logger.warning("Failed to parse tool_input as JSON, falling back to regex extraction")
+                pass
+
     try:
-        parsed_tool_input = extract_fields(tool_input,fields)
+        parsed_tool_input = extract_fields(tool_input, fields)
         return parsed_tool_input
     except Exception as e:
-        print(e)
+        logger.error(f"Error parsing tool input: {e}", exc_info=True)
         return None

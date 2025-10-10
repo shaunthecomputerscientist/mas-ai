@@ -1,43 +1,70 @@
 {
-
     "all":{
         "router": {
-            "model_name": "gemini-2.0-flash",
-            "category": "gemini"
+            "model_name": "gemini-2.5-flash",
+            "category": "gemini",
+            "description": "OpenAI GPT-4o-mini for fast routing decisions"
         },
         "evaluator": {
-            "model_name": "gemini-2.0-flash",
-            "category": "gemini"
+            "model_name": "gemini-2.5-flash",
+            "category": "gemini",
+            "description": "Gemini 1.5 Flash for quality evaluation"
         },
         "reflector": {
-            "model_name": "gemini-2.0-flash",
-            "category": "gemini"
+            "model_name": "gpt-5",
+            "category": "openai",
+            "description": "OpenAI GPT-4o for deep reflection"
         },
         "planner": {
-            "model_name": "gemini-2.0-flash",
-            "category": "gemini"
+            "model_name": "gpt-4o-mini",
+            "category": "openai",
+            "description": "OpenAI GPT-4o-mini for planning"
         }
     },
-    
 
     "research_agent":{
         "router": {
-            "model_name": "gemini-2.5-flash",
-            "category": "gemini"
+            "model_name": "gemini-1.5-flash",
+            "category": "gemini",
+            "description": "Gemini 1.5 Flash for research routing"
         },
         "evaluator": {
-            "model_name": "gemini-2.5-flash",
-            "category": "gemini"
+            "model_name": "gemini-1.5-pro",
+            "category": "gemini",
+            "description": "Gemini 1.5 Pro for research evaluation"
         },
         "reflector": {
-            "model_name": "gemini-2.5-flash",
-            "category": "gemini"
+            "model_name": "gemini-1.5-pro",
+            "category": "gemini",
+            "description": "Gemini 1.5 Pro for research reflection"
         },
         "planner": {
-            "model_name": "gemini-2.5-flash",
-            "category": "gemini"
+            "model_name": "gemini-1.5-flash",
+            "category": "gemini",
+            "description": "Gemini 1.5 Flash for research planning"
         }
+    },
 
+    "anthropic_test_agent":{
+        "router": {
+            "model_name": "claude-3.7-sonnet",
+            "category": "anthropic",
+            "description": "Claude 3.7 Sonnet hybrid reasoning model"
+        },
+        "evaluator": {
+            "model_name": "claude-4-sonnet",
+            "category": "anthropic",
+            "description": "Claude 4 Sonnet with extended thinking"
+        },
+        "reflector": {
+            "model_name": "claude-4-opus",
+            "category": "anthropic",
+            "description": "Claude 4 Opus with extended thinking for deep reflection"
+        },
+        "planner": {
+            "model_name": "claude-3.5-sonnet",
+            "category": "anthropic",
+            "description": "Claude 3.5 Sonnet standard model for planning"
+        }
     }
-   
 }

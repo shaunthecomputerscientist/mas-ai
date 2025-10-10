@@ -77,6 +77,11 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
             else:
                 parsed_response = await llm.generate_response_mas(**llm_call_args)
 
+            # Check if response is a string (error) instead of dict
+            if isinstance(parsed_response, str):
+                # LLM returned an error string, convert to proper error response
+                raise Exception(parsed_response)
+
             if self.logger:
                 log_answer = parsed_response.get('answer', 'N/A')
                 self.logger.info(f"Node {node_name} LLM response answer (truncated): {str(log_answer)[:config.truncated_response_length]}...")
@@ -116,7 +121,12 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
     # --- Synchronous Condition/Helper Methods (Keep from original Agent) ---
 
     async def checkroutingcondition(self, state: State) -> Literal["continue", "end", "reflection"]:
-        """Determine the next step in the workflow (synchronous). Overrides BaseAgent.check_condition."""
+        """
+        Determine the next step in the workflow (synchronous). Overrides BaseAgent.check_condition.
+
+        NOTE: This is called AFTER _update_state, so state is already updated.
+        We save the state here for continuity across workflow executions.
+        """
         if self.logger:
             self.logger.info('----------------------------Deciding Node--------------------------------')
             self.logger.info(f"Checking routing: satisfied={state.get('satisfied')}, current_tool='{state.get('current_tool')}', reflection_counter={state.get('reflection_counter')}, tool_loop_counter={state.get('tool_loop_counter')}")
@@ -125,6 +135,10 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
         current_tool = state.get("current_tool", None)
         reflection_counter = state.get('reflection_counter', 0)
         MAX_REFLECTIONS = config.MAX_REFLECTION_COUNT # Define max reflections
+
+        # NEW: Save state snapshot for continuity (before routing decision)
+        # This captures the current conversation state including messages, answer, etc.
+        self._save_state_snapshot(state)
 
         # End condition: Satisfied and no tool/delegation needed
         # Check for tool.return_direct case handled in execute_tool setting satisfied=True & tool=None
@@ -148,6 +162,41 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
         # Ensure the final answer reflects the situation (e.g., failure to satisfy)
         # This might need adjustment in the Reflector node logic.
         return "end"
+
+    def _save_state_snapshot(self, state: State) -> None:
+        """
+        Save a snapshot of the current state for continuity across workflow executions.
+
+        This is called in checkroutingcondition (after _update_state) to capture:
+        - Recent conversation messages
+        - Last answer
+        - Reasoning
+        - Any other relevant context
+        """
+        try:
+            # Get answer and ensure it's a string (not None)
+            last_answer = state.get("answer") or ""
+            last_reasoning = state.get("reasoning") or ""
+
+            # Create a lightweight snapshot (don't store everything)
+            self.retained_state = {
+                # Keep recent messages for context (limited by retain_messages_order)
+                "messages": state.get("messages", [])[-self.retain_messages_order:],
+                "last_answer": last_answer,
+                "last_reasoning": last_reasoning,
+                "satisfied": state.get("satisfied", False),
+                # Don't retain tool state (fresh start for each query)
+                # Don't retain counters (fresh start for each query)
+            }
+
+            if self.logger:
+                self.logger.debug(f"State snapshot saved: {len(self.retained_state.get('messages', []))} messages, "
+                                f"last_answer length: {len(last_answer)}")
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error saving state snapshot: {e}", exc_info=True)
+            # Don't fail the workflow if snapshot fails
+            self.retained_state = None
 
 
     async def _tool_loop_warning_prompt(self, state: State) -> str:
@@ -216,15 +265,18 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
         state['current_node'] = 'router'
         if self.logger: self.logger.info("--- Entering Router Node (Async) ---")
         prev_node = state.get('previous_node')
-        # Simple context fetching (consider refining based on actual needs)
+
+        # Build component context with priority order
         component_context = []
+
+        # Priority 1: If coming directly from evaluator or reflector
         if prev_node == 'evaluator' and self.llm_evaluator:
              component_context = self.llm_evaluator.chat_history[-self.shared_memory_order:]
         elif prev_node == 'reflector' and self.llm_reflector:
              component_context = self.llm_reflector.chat_history[-self.shared_memory_order:]
         else:
+            # Priority 2: Fallback to state messages
             component_context = state.get('messages', [])[-self.shared_memory_order:]
-        # Add other relevant contexts if needed
 
         prompt = await self._format_node_prompt(state=state, node='router')
         return await self.node_handler(state, self.llm_router, prompt, component_context=component_context, node='router')
@@ -381,37 +433,61 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
     async def initiate_agent(self, query: str, passed_from: Optional[str] = None, previous_node: Optional[str]= None) -> Dict:
         """
         Initiate the agent asynchronously and return the final result.
-        
+
         Args:
             query: The user query to process
             passed_from: Optional identifier of the component that passed the query
-            
+
         Returns:
             Dict: The final state containing the agent's response
         """
         if not self.app:
             raise ValueError("Agent workflow not compiled. Cannot initiate.")
         if self.logger: self.logger.debug(f"Agent: {self.agent_name}")
-        
+
         new_query = await self._sanitize_query(query)
-        
-        # Create initial state
-        initial_state = State(
-            messages=[{"role": "user", "content": new_query}],
-            current_tool="", tool_input=None, tool_output="", answer="",
-            satisfied=False, reasoning="", delegate_to_agent=None,
-            current_node='planner' if self.plan else 'router',
-            previous_node=previous_node, plan={}, passed_from=passed_from,
-            reflection_counter=0, tool_loop_counter=0, tool_decided_by=None
-        )
+
+        # NEW: Check if we have retained state from previous execution
+        if self.retained_state:
+            if self.logger:
+                self.logger.info(f"Restoring state from previous execution: "
+                               f"{len(self.retained_state.get('messages', []))} messages in history")
+
+            # Start with retained messages and add new query
+            initial_messages = self.retained_state.get("messages", []).copy()
+            initial_messages.append({"role": "user", "content": new_query})
+
+            # Create initial state with restored context
+            initial_state = State(
+                messages=initial_messages,
+                current_tool="", tool_input=None, tool_output="", answer="",
+                satisfied=False, reasoning="", delegate_to_agent=None,
+                current_node='planner' if self.plan else 'router',
+                previous_node=previous_node, plan={}, passed_from=passed_from,
+                reflection_counter=0, tool_loop_counter=0, tool_decided_by=None
+            )
+        else:
+            if self.logger:
+                self.logger.info("No retained state found, starting fresh")
+
+            # Create initial state (fresh start)
+            initial_state = State(
+                messages=[{"role": "user", "content": new_query}],
+                current_tool="", tool_input=None, tool_output="", answer="",
+                satisfied=False, reasoning="", delegate_to_agent=None,
+                current_node='planner' if self.plan else 'router',
+                previous_node=previous_node, plan={}, passed_from=passed_from,
+                reflection_counter=0, tool_loop_counter=0, tool_decided_by=None
+            )
+
         configuration = {"recursion_limit": config.MAX_RECURSION_LIMIT}
-        
+
         try:
             # Execute fully and return the final state
             final_state = await self.app.ainvoke(initial_state, config=configuration)
             # Return the final state dictionary directly
             return dict(final_state)  # Ensure it's a plain dict
-        
+
         except Exception as e:
             if self.logger: self.logger.error(f"Error during agent invocation: {e}", exc_info=True)
             error_state = initial_state.copy()  # Start with initial state
@@ -428,34 +504,60 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
     async def initiate_agent_astream(self, query: str, passed_from: Optional[str] = None, previous_node: Optional[str]= None) -> AsyncGenerator[Dict, None]:
         """
         Initiate the agent asynchronously with streaming updates.
-        
+
         Args:
             query: The user query to process
             passed_from: Optional identifier of the component that passed the query
-            
+
         Yields:
             Dict: State updates as the agent processes the query
         """
         if not self.app:
             raise ValueError("Agent workflow not compiled. Cannot initiate.")
         if self.logger: self.logger.debug(f"Agent: {self.agent_name}")
-        
+
         new_query = await self._sanitize_query(query)
-        
-        # Create initial state
-        initial_state = State(
-            messages=[{"role": "user", "content": new_query}],
-            current_tool="", tool_input=None, tool_output="", answer="",
-            satisfied=False, reasoning="", delegate_to_agent=None,
-            current_node='planner' if self.plan else 'router',previous_node=previous_node, plan={}, passed_from=passed_from,
-        reflection_counter=0, tool_loop_counter=0, tool_decided_by=None)
+
+        # NEW: Check if we have retained state from previous execution
+        if self.retained_state:
+            if self.logger:
+                self.logger.info(f"Restoring state from previous execution (streaming): "
+                               f"{len(self.retained_state.get('messages', []))} messages in history")
+
+            # Start with retained messages and add new query
+            initial_messages = self.retained_state.get("messages", []).copy()
+            initial_messages.append({"role": "user", "content": new_query})
+
+            # Create initial state with restored context
+            initial_state = State(
+                messages=initial_messages,
+                current_tool="", tool_input=None, tool_output="", answer="",
+                satisfied=False, reasoning="", delegate_to_agent=None,
+                current_node='planner' if self.plan else 'router',
+                previous_node=previous_node, plan={}, passed_from=passed_from,
+                reflection_counter=0, tool_loop_counter=0, tool_decided_by=None
+            )
+        else:
+            if self.logger:
+                self.logger.info("No retained state found, starting fresh (streaming)")
+
+            # Create initial state (fresh start)
+            initial_state = State(
+                messages=[{"role": "user", "content": new_query}],
+                current_tool="", tool_input=None, tool_output="", answer="",
+                satisfied=False, reasoning="", delegate_to_agent=None,
+                current_node='planner' if self.plan else 'router',
+                previous_node=previous_node, plan={}, passed_from=passed_from,
+                reflection_counter=0, tool_loop_counter=0, tool_decided_by=None
+            )
+
         configuration = {"recursion_limit": config.MAX_RECURSION_LIMIT}
-    
+
         try:
             # Stream state updates
             async for state in self.app.astream(initial_state, config=configuration, stream_mode=[config.stream_mode]):
                 yield state
-        
+
         except Exception as e:
             if self.logger: self.logger.error(f"Error during streaming: {e}", exc_info=True)
             yield {

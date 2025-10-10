@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: masai_framework
-Version: 0.2.0
+Version: 0.2.5
 Summary: Multi-Agent System Framework for AI Agents with Custom LangGraph Implementation
 Author-email: PILER <mrpolymathematica@gmail.com>
 Requires-Python: >=3.9
@@ -71,15 +71,16 @@ MAS AI introduces two agent architectures optimized for different use cases:
 
 ## Table of Contents
 1. [Introduction](#introduction)
-2. [Framework Architecture](#framework-architecture)
-3. [Custom LangGraph Implementation](#custom-langgraph-implementation)
-4. [Agent Components](#agent-components)
-5. [Memory System](#memory-system)
-6. [Multi-Agent Workflows](#multi-agent-workflows)
-7. [Parameter Reference](#parameter-reference)
-8. [Use Cases & Best Practices](#use-cases--best-practices)
-9. [Advanced Features](#advanced-features)
-10. [Installation & Setup](#installation--setup)
+2. [Temperature & Reasoning Models](#temperature--reasoning-models)
+3. [Framework Architecture](#framework-architecture)
+4. [Custom LangGraph Implementation](#custom-langgraph-implementation)
+5. [Agent Components](#agent-components)
+6. [Memory System](#memory-system)
+7. [Multi-Agent Workflows](#multi-agent-workflows)
+8. [Parameter Reference](#parameter-reference)
+9. [Use Cases & Best Practices](#use-cases--best-practices)
+10. [Advanced Features](#advanced-features)
+11. [Installation & Setup](#installation--setup)
 
 ---
 
@@ -92,6 +93,8 @@ MAS AI introduces two agent architectures optimized for different use cases:
 - **Hierarchical Memory System**: Short-term, component-shared, long-term, and vector store memory
 - **Multiple Collaboration Patterns**: Sequential, Hierarchical, Decentralized workflows
 - **LLM Flexibility**: Support for OpenAI, Gemini, Anthropic, Groq, Ollama, HuggingFace
+- **Intelligent Temperature Handling**: Automatic mapping to reasoning parameters (reasoning_effort, thinkingBudget, etc.)
+- **Advanced Reasoning Models**: Native support for GPT-5, o-series, Gemini 2.5, Claude 4 with automatic parameter adaptation
 - **Tool Integration**: LangChain-compatible tools with Redis caching support
 
 ### Why MAS-AI?
@@ -102,6 +105,104 @@ MAS-AI stands apart from conventional multi-agent frameworks by offering:
 2. **State-Machine Orchestration**: LangGraph-based state machine allows dynamic transitions between nodes based on satisfaction criteria
 3. **Granular Memory Integration**: Multi-layered memory system (short-term, component-shared, long-term, vector store)
 4. **Optimized for Complex Workflows**: Particularly well-suited for research-intensive tasks, multi-step decision processes, and tool-augmented execution
+
+---
+
+## Temperature & Reasoning Models
+
+MAS-AI provides **intelligent temperature handling** that automatically adapts to reasoning models from different providers. The framework transparently maps standard temperature values to provider-specific reasoning parameters.
+
+### 🎯 Automatic Parameter Mapping
+
+When you set a temperature value, MAS-AI automatically detects the model type and uses the appropriate reasoning parameter:
+
+| Temperature | OpenAI Reasoning | Gemini Thinking | Anthropic Extended | Standard Models |
+|-------------|------------------|-----------------|-------------------|-----------------|
+| **0.0 - 0.3** | `reasoning_effort: "low"` | `thinkingBudget: "low"` | `budget_tokens: 5000` | `temperature: 0.0-0.3` |
+| **0.4 - 0.7** | `reasoning_effort: "medium"` | `thinkingBudget: "medium"` | `budget_tokens: 10000` | `temperature: 0.4-0.7` |
+| **0.8 - 1.0** | `reasoning_effort: "high"` | `thinkingBudget: "high"` | `budget_tokens: 20000` | `temperature: 0.8-1.0` |
+
+### 🧠 Supported Reasoning Models
+
+#### OpenAI Reasoning Models
+- **GPT-5 Series**: `gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `gpt-5-thinking*`
+- **O-Series**: `o1`, `o1-mini`, `o1-preview`, `o3`, `o3-mini`, `o4-mini`
+- **GPT-4.1 Series**: `gpt-4.1`, `gpt-4.1-nano`
+
+**Note**: These models do NOT support the `temperature` parameter. MAS-AI automatically uses `reasoning_effort` instead.
+
+#### Gemini Thinking Models
+- **Gemini 2.5**: `gemini-2.5-flash`, `gemini-2.5-pro` (built-in thinking)
+- **Gemini 2.0**: `gemini-2.0-flash-thinking-exp` (experimental)
+
+**Note**: These models support both `temperature` AND optional `thinkingBudget` for enhanced reasoning control.
+
+#### Anthropic Extended Thinking
+- **Claude 4**: `claude-4-opus`, `claude-4-sonnet`
+- **Claude 3.7**: `claude-3.7-sonnet`
+
+**Note**: These models support both `temperature` AND optional `thinking.budget_tokens` for extended reasoning.
+
+### 💡 Usage Example
+
+```python
+from masai import AgentManager
+
+# Configure with temperature - MAS-AI handles the rest!
+agent_manager = AgentManager(
+    agent_name="research_agent",
+    model_config={
+        "router": {"model_name": "o4-mini", "category": "openai"},
+        "evaluator": {"model_name": "gemini-2.5-flash", "category": "gemini"},
+        "reflector": {"model_name": "gpt-5", "category": "openai"}
+    },
+    temperature=0.2  # Automatically maps to "low" reasoning effort
+)
+
+# For creative tasks, use higher temperature
+creative_agent = AgentManager(
+    agent_name="creative_agent",
+    temperature=0.9  # Automatically maps to "high" reasoning effort
+)
+```
+
+### 🎨 Temperature Guidelines
+
+| Use Case | Recommended Temperature | Reasoning Level |
+|----------|------------------------|-----------------|
+| **Factual Queries** | 0.0 - 0.3 | Low/Focused - Deterministic, precise reasoning |
+| **General Tasks** | 0.4 - 0.7 | Medium/Balanced - Balanced exploration and precision |
+| **Creative Tasks** | 0.8 - 1.0 | High/Exploratory - Creative, diverse reasoning paths |
+
+### 🔧 Model Configuration
+
+Configure different models for different components in `model_config.json`:
+
+```json
+{
+    "all": {
+        "router": {
+            "model_name": "o4-mini",
+            "category": "openai"
+        },
+        "evaluator": {
+            "model_name": "gemini-2.5-flash",
+            "category": "gemini"
+        },
+        "reflector": {
+            "model_name": "gpt-5",
+            "category": "openai"
+        }
+    }
+}
+```
+
+**Key Benefits:**
+- ✅ **Transparent**: Use standard temperature values everywhere
+- ✅ **Automatic**: Framework handles provider-specific parameters
+- ✅ **Flexible**: Mix different reasoning models in one agent
+- ✅ **Optimal**: Each provider uses its best reasoning mechanism
+
 
 ---
 
@@ -1217,11 +1318,45 @@ oman = OrchestratedMultiAgentNetwork(
 
 | Component | Recommended Model | Reasoning |
 |-----------|------------------|-----------|
-| **Router** | Fast model (Gemini Flash, GPT-3.5) | Frequent calls, simple routing |
-| **Evaluator** | Fast model (Gemini Flash Lite) | Binary decision (satisfied/not) |
-| **Reflector** | Medium model (Gemini Flash) | Summarization and insights |
-| **Planner** | Strong model (GPT-4, Gemini Pro) | Complex task decomposition |
-| **Supervisor** | Strong model (GPT-4, Gemini Pro) | High-level coordination |
+| **Router** | Fast model (GPT-5-nano, Gemini Flash, GPT-4o-mini) | Frequent calls, simple routing |
+| **Evaluator** | Fast model (GPT-5-mini, Gemini Flash) | Binary decision (satisfied/not) |
+| **Reflector** | Strong model (GPT-5, GPT-4o, Gemini Pro) | Complex reasoning and insights |
+| **Planner** | Strong model (GPT-5, GPT-4o, Gemini Pro) | Complex task decomposition |
+| **Supervisor** | Strong model (GPT-5, GPT-4o, Gemini Pro) | High-level coordination |
+
+### GPT-5 Support
+
+**MAS-AI natively supports GPT-5 reasoning models** released by OpenAI in August 2025. GPT-5 models offer superior reasoning capabilities but require different parameters than GPT-4.
+
+**Available Models:**
+- `gpt-5`: Full reasoning model (best quality)
+- `gpt-5-mini`: Balanced speed/quality
+- `gpt-5-nano`: Fastest, most cost-effective
+- `gpt-5-thinking`: Extended reasoning with visible thought process
+
+**Key Differences:**
+- ❌ GPT-5 does NOT support `temperature`, `top_p`, `presence_penalty`, `frequency_penalty`
+- ✅ GPT-5 uses `reasoning_effort` instead: `"minimal"`, `"medium"`, `"high"`
+- ✅ MASAI automatically maps temperature to reasoning_effort (no code changes needed)
+
+**Configuration Example:**
+```json
+{
+    "all": {
+        "router": {"model_name": "gpt-5-nano", "category": "openai"},
+        "evaluator": {"model_name": "gpt-5-mini", "category": "openai"},
+        "reflector": {"model_name": "gpt-5", "category": "openai"},
+        "planner": {"model_name": "gpt-5-mini", "category": "openai"}
+    }
+}
+```
+
+**Temperature Mapping:**
+- Temperature 0.0-0.3 → `reasoning_effort: "minimal"` (fast, deterministic)
+- Temperature 0.4-0.7 → `reasoning_effort: "medium"` (balanced, default)
+- Temperature 0.8-1.0 → `reasoning_effort: "high"` (deep reasoning)
+
+📖 **See [docs/GPT5_INTEGRATION_GUIDE.md](docs/GPT5_INTEGRATION_GUIDE.md) for detailed GPT-5 integration guide**
 
 ---
 

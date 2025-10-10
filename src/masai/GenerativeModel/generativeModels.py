@@ -184,6 +184,7 @@ class MASGenerativeModel(BaseGenerativeModel):
             
             self.logger.error(f"Error in long context summarization: {e}")
             raise e
+    
 
     async def _update_context_callable(self, query, role):
         if role.lower()=="user":
@@ -252,7 +253,11 @@ class MASGenerativeModel(BaseGenerativeModel):
             # Use the prompt template with MAS-specific inputs
             if self.logger:
                 startapi=time.time()
-            response = (await self.model.with_structured_output(output_structure).ainvoke(
+
+            # Use json_mode for OpenAI and Gemini for better reliability
+            structured_model = self._return_structured_model(prompt, output_structure)
+
+            response = (await structured_model.ainvoke(
                 self.prompt.format(**mas_inputs)
             )).model_dump()
             
@@ -262,11 +267,10 @@ class MASGenerativeModel(BaseGenerativeModel):
                 self.logger.debug(f"LLM Api response time {time.time()-startapi}")
                 # self.logger.info(response['answer'][:20])
             
-            # print(response)
             # Update chat history with structured response
             
             if isinstance(response, dict) and 'answer' in response:
-                self.chat_history.append({'role': role, 'content': response['answer']})
+                self.chat_history.append({'role': agent_name, 'content': response['answer']})
             
             # print("returning response", time.time()-start)
             
@@ -290,10 +294,32 @@ class MASGenerativeModel(BaseGenerativeModel):
     
     async def _update_component_context(self, component_context, role, prompt):
         if component_context:
+            # Check for duplicate tool outputs and truncate if found
+            if self._has_duplicate_tool_output(component_context, prompt):
+                # Truncate tool outputs in component context messages
+                truncated_context = []
+                for message in component_context:
+                    # Defensive check: ensure message is a dict with content key
+                    if not isinstance(message, dict) or 'content' not in message:
+                        truncated_context.append(message)  # Keep as-is if malformed
+                        continue
+                    truncated_message = message.copy()
+                    truncated_message['content'] = self._truncate_tool_output_in_content(
+                        message.get('content', '')
+                    )
+                    truncated_context.append(truncated_message)
+                component_context = truncated_context
             self.chat_history.extend(component_context)
             self.chat_history.append({'role': role, 'content': prompt})
         else:
             self.chat_history.append({'role': role, 'content': prompt})
+
+
+
+
+
+
+
     async def _update_role(self, agent_name, kwargs):
         if 'passed_from' in kwargs:
             if kwargs['passed_from'] is not None:
@@ -352,6 +378,58 @@ class MASGenerativeModel(BaseGenerativeModel):
                 return None
         else:
             return None
+        
+    def _truncate_tool_output_in_content(self, content: str, max_words: int = 30) -> str:
+        """
+        Truncate tool output within <PREVIOUS TOOL OUTPUT START>...<PREVIOUS TOOL OUTPUT END> tags.
+        Args:
+            content: Message content that may contain tool output
+            max_words: Maximum number of words to keep in tool output
+        Returns:
+            Content with truncated tool output
+        """
+        import re
+        # Pattern to match tool output sections
+        pattern = r'<PREVIOUS TOOL OUTPUT START>\n(.*?)\n<PREVIOUS TOOL OUTPUT END>'
+        def truncate_match(match):
+            tool_output = match.group(1)
+            words = tool_output.split()
+            if len(words) <= max_words:
+                return match.group(0)  # Return original if already short enough
+            truncated = ' '.join(words[:max_words])
+            return f'<PREVIOUS TOOL OUTPUT START>\n{truncated}...\n<PREVIOUS TOOL OUTPUT END>'
+        return re.sub(pattern, truncate_match, content, flags=re.DOTALL)
+    def _has_duplicate_tool_output(self, component_context, current_prompt):
+        """
+        Check if component context contains the same tool output as current prompt.
+        Args:
+            component_context: List of context messages
+            current_prompt: Current prompt content
+        Returns:
+            True if duplicate tool output found
+        """
+        import re
+        # Extract tool output from current prompt
+        current_pattern = r'<PREVIOUS TOOL OUTPUT START>\n(.*?)\n<PREVIOUS TOOL OUTPUT END>'
+        current_match = re.search(current_pattern, current_prompt, re.DOTALL)
+        if not current_match:
+            return False
+        current_tool_output = current_match.group(1).strip()
+        # Check if any message in component context has the same tool output
+        for message in component_context:
+            # Defensive check: ensure message is a dict with content key
+            if not isinstance(message, dict) or 'content' not in message:
+                continue
+            content = message.get('content', '')
+            if content is None:
+                continue
+            context_matches = re.findall(current_pattern, content, re.DOTALL)
+            for context_tool_output in context_matches:
+                if context_tool_output.strip() == current_tool_output:
+                    return True
+        return False
+
+
     async def astream_response_mas(
         self, 
         prompt: str, 
@@ -397,7 +475,8 @@ class MASGenerativeModel(BaseGenerativeModel):
         
         try:
             # Create structured output model for streaming
-            structured_llm = self.model.with_structured_output(output_structure)
+            # Use json_mode for OpenAI and Gemini for better reliability
+            structured_llm= self._return_structured_model(prompt=prompt,output_structure=output_structure)
             
             # Final response to be returned
             final_response = None
@@ -425,7 +504,7 @@ class MASGenerativeModel(BaseGenerativeModel):
                 
             # Update chat history with the complete response
             if isinstance(response_dict, dict) and 'answer' in response_dict:
-                self.chat_history.append({'role': role, 'content': response_dict['answer']})
+                self.chat_history.append({'role': agent_name, 'content': response_dict['answer']})
             
             return response_dict
             

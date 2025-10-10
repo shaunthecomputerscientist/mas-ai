@@ -35,7 +35,7 @@ class State(TypedDict):
 class BaseAgent:
     _logger = None
 
-    def __init__(self, agent_name: str, logging: bool = True, shared_memory_order: int = 5, retain_messages_order: int = 20):
+    def __init__(self, agent_name: str, logging: bool = True, shared_memory_order: int = 5, retain_messages_order: int = 30):
         """Base class for agents with common functionality."""
         self.agent_name = agent_name.lower()
         self.logging = logging
@@ -47,7 +47,9 @@ class BaseAgent:
         self.tool_mapping: Dict[str, Any] = {}
         self.pydanticmodel: Optional[Type[BaseModel]] = None
         self.agent_context: Optional[Dict[str, Any]] = None
-        # self.node = 'evaluator' # This seems less useful than state['current_node']
+
+        # NEW: Retained state for continuity across workflow executions
+        self.retained_state: Optional[Dict[str, Any]] = None
 
         if self.logging:
             # Use a shared logger instance across all agents if desired
@@ -119,6 +121,12 @@ class BaseAgent:
         # Update previous/current node first
         current_state['previous_node'] = node # The node we're entering
         current_state['current_node'] = None  # Reset current
+
+        # Filter out Pydantic model name (happens with function_calling method)
+        # When using method="function_calling", OpenAI may return the model class name as tool
+        if tool_name and tool_name.upper() in ["ANSWERFORMAT", "ANSWER_FORMAT"]:
+            if self.logger: self.logger.debug(f"Filtered out Pydantic model name '{tool_name}' from tool field")
+            tool_name = None
 
         if tool_name and tool_name not in ["None", None]:
             current_state["current_tool"] = tool_name

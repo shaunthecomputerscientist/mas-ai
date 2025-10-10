@@ -126,7 +126,7 @@ class AgentManager:
 
     def create_agent(self, agent_name: str, tools: List[object], agent_details: AgentDetails, 
                  memory_order: int = 10, long_context: bool = True,long_context_order: int = 20, shared_memory_order: int = 10, 
-                 plan: bool = False,temperature=0.2,context_callable:Optional[Callable]=None, **kwargs):
+                 plan: bool = False,temperature=0.2,context_callable:Optional[Callable]=None,retain_messages_order: int = 10,**kwargs):
         """Create and register a new agent in the AgentManager.
 
         Args:
@@ -139,6 +139,7 @@ class AgentManager:
             shared_memory_order (int, optional): Shared memory size for components. Defaults to 10.
             plan (bool, optional): Include planner if True. Defaults to False.
             context_callable (Optional[Callable]): Callable that uses user input to give more context to the llm during inference.
+            retain_messages_order (int, optional): Number of past interactions to keep in memory for an agent's internal state across multiple queries. Defaults to 10.
             
             **kwargs: Additional keyword arguments.  Can include:
                 - `config_dict` (dict, optional): A dictionary specifying memory order overrides for individual LLMs.
@@ -222,7 +223,7 @@ class AgentManager:
         else:
             llm_planner = None
 
-        agent = Agent(agent_name, llm_router, llm_evaluator, llm_reflector, llm_planner, tool_mapping, AnswerFormat, self.logging, shared_memory_order=shared_memory_order)
+        agent = Agent(agent_name, llm_router, llm_evaluator, llm_reflector, llm_planner, tool_mapping, AnswerFormat, self.logging, shared_memory_order=shared_memory_order,retain_messages_order=retain_messages_order)
         self.agents[agent_name.lower()] = agent
         self.agent_prompts[agent_name.lower()] = system_prompt
     def _compile_agents(self,type='decentralized',agent_context:dict=None):
@@ -281,7 +282,54 @@ class AgentManager:
     def list_agents(self) -> List[str]:
         """List all registered agents."""
         return list(self.agents.keys())
-    
-    
 
+    def cleanup(self) -> None:
+        """
+        Cleanup all resources held by AgentManager.
 
+        This method is called when AgentManager is removed from cache (after 30 min TTL).
+        It ensures all agents, LLM instances, and their memory are properly freed.
+        """
+        try:
+            # Clear all agents and their resources
+            for agent_name, agent in self.agents.items():
+                # Clear agent's retained state
+                if hasattr(agent, 'retained_state'):
+                    agent.retained_state = None
+
+                # Clear LLM chat histories
+                if hasattr(agent, 'llm_router') and agent.llm_router:
+                    if hasattr(agent.llm_router, 'chat_history'):
+                        agent.llm_router.chat_history.clear()
+
+                if hasattr(agent, 'llm_evaluator') and agent.llm_evaluator:
+                    if hasattr(agent.llm_evaluator, 'chat_history'):
+                        agent.llm_evaluator.chat_history.clear()
+
+                if hasattr(agent, 'llm_reflector') and agent.llm_reflector:
+                    if hasattr(agent.llm_reflector, 'chat_history'):
+                        agent.llm_reflector.chat_history.clear()
+
+                if hasattr(agent, 'llm_planner') and agent.llm_planner:
+                    if hasattr(agent.llm_planner, 'chat_history'):
+                        agent.llm_planner.chat_history.clear()
+
+                # Clear tool mapping
+                if hasattr(agent, 'tool_mapping'):
+                    agent.tool_mapping.clear()
+
+            # Clear agent registry
+            self.agents.clear()
+            self.agent_prompts.clear()
+
+            # Clear context
+            if self.context:
+                self.context.clear()
+
+        except Exception as e:
+            # Don't fail cleanup, just log if possible
+            print(f"Error during AgentManager cleanup: {e}")
+
+    def __del__(self):
+        """Destructor to ensure cleanup when AgentManager is garbage collected."""
+        self.cleanup()
