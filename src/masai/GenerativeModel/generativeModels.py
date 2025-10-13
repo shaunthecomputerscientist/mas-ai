@@ -253,6 +253,7 @@ class MASGenerativeModel(BaseGenerativeModel):
             # Use the prompt template with MAS-specific inputs
             if self.logger:
                 startapi=time.time()
+                self.logger.debug(f"LLM Api request time {time.time()-startapi}")
 
             # Use json_mode for OpenAI and Gemini for better reliability
             structured_model = self._return_structured_model(prompt, output_structure)
@@ -265,7 +266,7 @@ class MASGenerativeModel(BaseGenerativeModel):
                 
                 
                 self.logger.debug(f"LLM Api response time {time.time()-startapi}")
-                # self.logger.info(response['answer'][:20])
+                self.logger.info(f"Returned Response : {response}")
             
             # Update chat history with structured response
             

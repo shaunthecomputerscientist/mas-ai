@@ -31,6 +31,7 @@ class State(TypedDict):
     reflection_counter: int # Defaults set in Agent's initial_state
     tool_loop_counter: int # Defaults set in Agent's initial_state
     tool_decided_by: Optional[str] # Track which node decided to use the current tool
+    current_question: str # Track the current question being processed
 
 class BaseAgent:
     _logger = None
@@ -376,12 +377,49 @@ class BaseAgent:
             self.logger.warning(f"Tool: {tool_name}, Output: {log_output}")
             self.logger.warning("-----------------------------------------------------------------------------------")
 
-        state['tool_output'] = str(result)
-        state['passed_from'] = tool_name
-        state["messages"].append({"role": "tool", "name": tool_name, "content": state['tool_output']})
+        # Check for return_direct in three places (priority order):
+        # 1. Tool decorator's return_direct attribute (lowest priority)
+        # 2. Dynamic return_direct from tool input parameter (medium priority)
+        # 3. Return value from tool execution (highest priority)
 
-        if hasattr(tool, 'return_direct') and tool.return_direct:
-             if self.logger: self.logger.warning(f"Tool '{tool_name}' requested return_direct. Setting final answer.")
+        tool_decorator_return_direct = hasattr(tool, 'return_direct') and tool.return_direct
+        input_return_direct = False
+        result_return_direct = False
+        actual_result = result
+
+        # Check if tool_input contains return_direct parameter
+        if isinstance(tool_input, dict) and 'return_direct' in tool_input:
+            input_return_direct = tool_input.get('return_direct', False)
+            if self.logger:
+                self.logger.info(f"Tool '{tool_name}' has return_direct={input_return_direct} from tool_input")
+
+        # Check if result is a dict with return_direct key (tool decided internally)
+        if isinstance(result, dict) and 'return_direct' in result:
+            result_return_direct = result.get('return_direct', False)
+            # Extract actual result (remove return_direct from output)
+            actual_result = {k: v for k, v in result.items() if k != 'return_direct'}
+            if self.logger:
+                self.logger.info(f"Tool '{tool_name}' returned return_direct={result_return_direct} in result")
+
+        # Priority: result > input > decorator
+        should_return_direct = result_return_direct or input_return_direct or tool_decorator_return_direct
+
+        # Determine source for logging
+        if result_return_direct:
+            source = "return value"
+        elif input_return_direct:
+            source = "input parameter"
+        else:
+            source = "decorator"
+
+        # Store the actual result (without return_direct metadata)
+        state['tool_output'] = str(actual_result)
+        state['passed_from'] = tool_name
+        state["messages"].append({"role": tool_name, "content": state['tool_output']})
+
+        if should_return_direct:
+             if self.logger:
+                 self.logger.warning(f"Tool '{tool_name}' requested return_direct ({source}). Setting final answer.")
              state.update({
                  'current_tool': None, 'tool_input': None, 'answer': state['tool_output'],
                  'reasoning': f"Result directly provided by tool '{tool_name}'.",

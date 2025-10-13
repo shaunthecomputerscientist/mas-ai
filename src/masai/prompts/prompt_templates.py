@@ -1,4 +1,6 @@
 ROUTER_PROMPT = """
+<SYSTEM HANDLING GUIDELINES START/>
+UNDERSTAND USER QUESTION/INTENT FROM PAST INTERACTIONS+CONTEXT AND TAKE BEST COURSE OF ACTION.
 Understand user question and intent from past interactions and take best course of action.
 GENERAL GUIDELINES:
    1) Enclose all dictionary properties/values in double quotes for valid JSON
@@ -9,9 +11,13 @@ GENERAL GUIDELINES:
 DECISION FLOW (ACTION TYPES):
    1) Continue working (satisfied=False + tool_input≠None) → Use tools/knowledge/chat_history,context;
    2) Delegate (satisfied=True + tool=None + delegate_to_agent=name) → Delegate task when necessary.
-ERROR PROTOCOLS: Reuse existing info from history, prevent loops via attempt tracking, provide detailed failure/delegation rationales. Maintain inter-agent communication for complex problem solving.
+ERROR PROTOCOLS: 
+1) Reuse existing info from history, prevent loops via attempt tracking, provide detailed failure/delegation rationales. 
+2) Maintain inter-agent communication for complex problem solving.
+<SYSTEM HANDLING GUIDELINES END/>
 """
 EVALUATOR_PROMPT = """
+<SYSTEM HANDLING GUIDELINES START/>
 GENERAL GUIDELINES:
    1) Enclose all dictionary properties/values in double quotes for valid JSON
    2) Strictly adhere to tool_input schema for tool_input of available tools.
@@ -21,9 +27,13 @@ DECISION FLOW (ACTION TYPES):
    1) Continue working (satisfied=False + tool_input≠None) → Use tools/knowledge/chat_history,context;
    2) Reflect/reason (satisfied=False + tool_input=None) → Analyze context for next steps;
    3) Delegate (satisfied=True + tool=None + delegate_to_agent=name) → Delegate task to agent when necessary.
-ERROR PROTOCOLS: Reuse existing info from history, provide detailed failure/delegation rationales. Maintain inter-agent communication for complex problem solving.
+ERROR PROTOCOLS: 
+1) Reuse existing info from history, provide detailed failure/delegation rationales. 
+2) Maintain inter-agent communication for complex problem solving.
+<SYSTEM HANDLING GUIDELINES END/>
 """
 PLANNER_PROMPT = """
+<SYSTEM HANDLING GUIDELINES START/>
 Your task right now is to plan necessary steps in detail given the user query or delegate to agent.
 GOAL:
 1.PASS the plan to the evaluator. Evaluator will execute the plan and return the answer. So write detailed plan.
@@ -38,8 +48,10 @@ set satisfied to False else True if delegation is needed to appropriate agent.
 set tool to None.
 set tool_input to None.
 set delegate_to_agent to None else set to appropriate agent name.
+<SYSTEM HANDLING GUIDELINES END/>
 """
 REFLECTOR_PROMPT = """
+<SYSTEM HANDLING GUIDELINES START/>
 Your task right now is to reason and reflect.
 Analyze queries using CHAT HISTORY ,tool outputs, Question and provided context to determine optimal response.
 YOU HAVE FOLLOWING ACTIONS:
@@ -53,6 +65,7 @@ RULES:
 - Strictly follow tool_input json schema;
 - Avoid redundant reflections on same history;
 - Prioritize detailed logical responses.
+<SYSTEM HANDLING GUIDELINES END/>
 """
 SUPERVISOR_PROMPT = """
 You are an intelligent and efficient personal supervisor agent. Your role is to assist human by providing accurate answers or coordinating tasks seamlessly.
@@ -84,6 +97,7 @@ EVALUATOR_NODE_PROMPT = (
     "{warning}\n\n"
     "=== CONTEXT ===\n"
     "USER QUESTION:\n{original_question}\n\n"
+    "<PREVIOUS TOOL INPUT START>\n{tool_input}\n<PREVIOUS TOOL INPUT END>\n"
     "<PREVIOUS TOOL OUTPUT START>\n{tool_output}\n<PREVIOUS TOOL OUTPUT END>\n"
     "{plan_str}\n"
     "=== END CONTEXT ===\n\n"
@@ -93,6 +107,7 @@ REFLECTOR_NODE_PROMPT = (
     "=== CONTEXT ===\n"
     "Current Stage: REFLECTION (Attempt {reflection_count_display})\n"
     "ORIGINAL QUESTION:\n{original_question}\n\n"
+    "<PREVIOUS TOOL INPUT START>\n{tool_input}\n<PREVIOUS TOOL INPUT END>\n"
     "<PREVIOUS TOOL OUTPUT START>\n{tool_output}\n<PREVIOUS TOOL OUTPUT END>\n"
     "{plan_str}\n"
     "=== END CONTEXT ===\n\n"

@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: masai_framework
-Version: 0.2.5
+Version: 0.2.9
 Summary: Multi-Agent System Framework for AI Agents with Custom LangGraph Implementation
 Author-email: PILER <mrpolymathematica@gmail.com>
 Requires-Python: >=3.9
@@ -1404,7 +1404,110 @@ print(response)
 - Conversational interfaces without tool needs
 - Prototyping before adding agent architecture
 
-### 2. Redis Caching for Tools
+### 2. Dynamic `return_direct` for Tools
+
+Control whether tool outputs are returned directly to the user or passed through the evaluation pipeline. Supports three levels of control with priority: **Return Value > Parameter > Decorator**.
+
+#### Three Levels of Control
+
+**1. Decorator Level (Static)**
+```python
+from langchain.tools import tool
+
+@tool("Database Query", return_direct=True)
+async def query_database(query: str) -> str:
+    """Execute database query. Results always returned directly."""
+    return db.execute(query)
+```
+
+**2. Parameter Level (Dynamic)**
+```python
+@tool("Smart Query", return_direct=False)
+async def smart_query(
+    query: str,
+    return_direct: bool = False  # LLM can control this
+) -> str:
+    """
+    Execute query with optional direct return.
+
+    Args:
+        query: SQL query to execute
+        return_direct: If True, return results directly without evaluation
+    """
+    return db.execute(query)
+```
+
+**3. Return Value Level (Runtime)**
+```python
+@tool("Adaptive Query", return_direct=False)
+async def adaptive_query(query: str) -> dict:
+    """Tool decides internally based on result complexity."""
+    results = db.execute(query)
+
+    # Tool decides based on result size
+    if len(results) < 10:
+        # Simple result - return directly
+        return {
+            "data": results,
+            "return_direct": True  # Tool decides to skip evaluation
+        }
+    else:
+        # Complex result - needs evaluation
+        return {
+            "data": results,
+            "return_direct": False  # Tool decides to evaluate
+        }
+```
+
+#### Priority Matrix
+
+| Decorator | Parameter | Return Value | Effective | Winner |
+|-----------|-----------|--------------|-----------|--------|
+| `True` | Not set | Not set | `True` | Decorator |
+| `False` | `True` | Not set | `True` | **Parameter** |
+| `True` | `False` | Not set | `False` | **Parameter** |
+| `True` | `True` | `False` | `False` | **Return Value** |
+| `False` | `False` | `True` | `True` | **Return Value** |
+
+#### Use Cases
+
+**Database Queries**: User wants raw data vs. analysis
+```python
+# User: "Get all active users, return raw data"
+# LLM calls: smart_query(query="...", return_direct=True)
+# → Returns JSON directly
+
+# User: "Analyze active users"
+# LLM calls: smart_query(query="...", return_direct=False)
+# → Goes through evaluator for analysis
+```
+
+**File Operations**: Content vs. metadata
+```python
+@tool("File Reader", return_direct=False)
+async def read_file(path: str, return_direct: bool = False) -> str:
+    """Read file with optional direct return."""
+    content = open(path).read()
+    return content
+
+# User: "Show me config.json"
+# → return_direct=True, shows file directly
+
+# User: "Analyze config.json"
+# → return_direct=False, evaluator analyzes
+```
+
+**Benefits**:
+- ✅ **Flexibility**: Single tool handles both direct and evaluated outputs
+- ✅ **LLM Control**: LLM decides based on user intent
+- ✅ **Efficiency**: Skip unnecessary evaluation for simple queries
+- ✅ **Smart Tools**: Tools can decide internally based on result complexity
+
+For detailed documentation, see [docs/DYNAMIC_RETURN_DIRECT.md](docs/DYNAMIC_RETURN_DIRECT.md)
+
+---
+
+### 3. Redis Caching for Tools
 
 Cache tool outputs to improve performance for frequently used queries:
 
@@ -1442,7 +1545,9 @@ def expensive_api_call(query: str) -> str:
 - Redis server running
 - `redis` Python package installed
 
-### 3. In-Memory Vector Store
+---
+
+### 4. In-Memory Vector Store
 
 For long conversations with semantic search capabilities:
 
@@ -1480,7 +1585,9 @@ manager.create_agent(
 - Sentence Transformers (default: `all-MiniLM-L6-v2`)
 - LangChain embedding models (OpenAI, Cohere, etc.)
 
-### 4. Streaming Callbacks
+---
+
+### 5. Streaming Callbacks
 
 For real-time response streaming:
 
@@ -1508,7 +1615,9 @@ manager = AgentManager(
 - Progress indicators
 - Debugging and monitoring
 
-### 5. Per-Component Configuration
+---
+
+### 6. Per-Component Configuration
 
 Override model settings for specific components:
 
@@ -1542,7 +1651,9 @@ manager.create_agent(
 - Optimize for specific use cases
 - Balance cost vs. performance
 
-### 6. Context Callable (Dynamic Context)
+---
+
+### 7. Context Callable (Dynamic Context)
 
 Fetch dynamic context on each query:
 

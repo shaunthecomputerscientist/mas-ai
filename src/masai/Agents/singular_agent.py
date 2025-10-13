@@ -185,7 +185,9 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
                 "last_answer": last_answer,
                 "last_reasoning": last_reasoning,
                 "satisfied": state.get("satisfied", False),
-                # Don't retain tool state (fresh start for each query)
+                "tool_output": state.get("tool_output", "N/A"),
+                "current_tool": state.get("current_tool", "N/A"),
+                "tool_input": state.get("tool_input", "N/A"),
                 # Don't retain counters (fresh start for each query)
             }
 
@@ -208,9 +210,11 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
 
     async def _format_node_prompt(self, state: State, node: str) -> str:
         """Format the prompt for a specific node (synchronous)."""
-        messages = state.get('messages', [])
         tool_output = state.get('tool_output', 'N/A') # Default if no tool output yet
-        original_question = messages[0]['content'] if messages else "No original question found."
+        # Use current_question from state instead of messages[0]['content']
+        original_question = state.get('current_question', 'No original question found.')
+        tool_input = state.get('tool_input', 'N/A')
+
         # Safely access plan, format if exists
         plan_dict = state.get('plan')
         plan_str = ""
@@ -227,7 +231,8 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
                     warning=warning,
                     original_question=original_question,
                     tool_output=tool_output,
-                    plan_str=plan_str
+                    plan_str=plan_str,
+                    tool_input=tool_input
                 )
 
         elif node == 'reflector':
@@ -236,7 +241,8 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
                     original_question=original_question,
                     tool_output=tool_output,
                     plan_str=plan_str,
-                    reflection_count_display=reflection_count_display
+                    reflection_count_display=reflection_count_display,
+                    tool_input=tool_input
                 )
 
         elif node == 'planner':
@@ -460,11 +466,12 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
             # Create initial state with restored context
             initial_state = State(
                 messages=initial_messages,
-                current_tool="", tool_input=None, tool_output="", answer="",
+                current_tool=self.retained_state.get("current_tool", ""), tool_input=self.retained_state.get("tool_input", None), tool_output=self.retained_state.get("tool_output", ""), answer=self.retained_state.get("last_answer", ""),
                 satisfied=False, reasoning="", delegate_to_agent=None,
                 current_node='planner' if self.plan else 'router',
                 previous_node=previous_node, plan={}, passed_from=passed_from,
-                reflection_counter=0, tool_loop_counter=0, tool_decided_by=None
+                reflection_counter=0, tool_loop_counter=0, tool_decided_by=None,
+                current_question=new_query  # Track current question
             )
         else:
             if self.logger:
@@ -477,7 +484,8 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
                 satisfied=False, reasoning="", delegate_to_agent=None,
                 current_node='planner' if self.plan else 'router',
                 previous_node=previous_node, plan={}, passed_from=passed_from,
-                reflection_counter=0, tool_loop_counter=0, tool_decided_by=None
+                reflection_counter=0, tool_loop_counter=0, tool_decided_by=None,
+                current_question=new_query  # Track current question
             )
 
         configuration = {"recursion_limit": config.MAX_RECURSION_LIMIT}
@@ -531,11 +539,12 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
             # Create initial state with restored context
             initial_state = State(
                 messages=initial_messages,
-                current_tool="", tool_input=None, tool_output="", answer="",
+                current_tool=self.retained_state.get("current_tool", ""), tool_input=self.retained_state.get("tool_input", None), tool_output=self.retained_state.get("tool_output", ""), answer=self.retained_state.get("last_answer", ""),
                 satisfied=False, reasoning="", delegate_to_agent=None,
                 current_node='planner' if self.plan else 'router',
                 previous_node=previous_node, plan={}, passed_from=passed_from,
-                reflection_counter=0, tool_loop_counter=0, tool_decided_by=None
+                reflection_counter=0, tool_loop_counter=0, tool_decided_by=None,
+                current_question=new_query  # Track current question
             )
         else:
             if self.logger:
@@ -548,7 +557,8 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
                 satisfied=False, reasoning="", delegate_to_agent=None,
                 current_node='planner' if self.plan else 'router',
                 previous_node=previous_node, plan={}, passed_from=passed_from,
-                reflection_counter=0, tool_loop_counter=0, tool_decided_by=None
+                reflection_counter=0, tool_loop_counter=0, tool_decided_by=None,
+                current_question=new_query  # Track current question
             )
 
         configuration = {"recursion_limit": config.MAX_RECURSION_LIMIT}

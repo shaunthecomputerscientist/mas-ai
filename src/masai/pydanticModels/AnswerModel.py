@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 def answermodel(tool_names: List[str], tools) -> Type[BaseModel]:
         """Define the AnswerFormat model dynamically based on tools."""
         class AnswerFormat(BaseModel):
-            answer: Optional[Union[str,List[str],Dict]] = Field(..., description="Write final generated answer/response when finished the task.")
+            answer: Optional[Union[str,List[str],Dict]] = Field(None, description="Write final generated answer/response when finished the task.")
             satisfied: bool = Field(..., description="Set to True to return final answer and (tool,tool_input=None). Set to False for further work on task (reflection, tool usage, etc).")
             tool: Optional[str] = Field(
                 None,
