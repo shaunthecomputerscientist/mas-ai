@@ -1,4 +1,4 @@
-from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, PromptTemplate, SystemMessagePromptTemplate
+from ..prompts import ChatPromptTemplate, HumanMessagePromptTemplate, PromptTemplate, SystemMessagePromptTemplate
 from typing import List, Dict, Any, Literal, TypedDict, Tuple, Union, Type, Optional, Callable
 from pydantic import BaseModel, Field
 import json
@@ -240,9 +240,111 @@ class MultiAgentSystem:
                     agent=next_agent.agent_name,
                     input=agent_output['answer'],
                     reasoning=agent_output['reasoning'])
-            
+
         return agent_output
-    
+
+    async def initiate_decentralized_mas_astream(self, query: str, set_entry_agent: Agent, memory_order: int = 3, passed_from: str = "user"):
+        """
+        Stream version of initiate_decentralized_mas.
+
+        This function streams state updates as agents process the query in a decentralized manner.
+        Control can be passed to any agent at any time, and the system maintains state across delegations.
+
+        Args:
+            query (str): Query to be processed
+            set_entry_agent (Agent): Agent that is responsible for delegating the first task or entry point agent
+            memory_order (int, optional): Number of previous messages from each agent to keep in memory. Defaults to 3.
+            passed_from (str, optional): Source of the query. Defaults to "user".
+
+        Yields:
+            Dict: State updates as agents process the query
+
+        Raises:
+            ValueError: if agent is not found
+        """
+        # Determine entry agent
+        if self.state['last_agent'] in self.agentManager.agents.keys():
+            current_agent = self.agentManager.agents[self.state['last_agent']]
+        else:
+            current_agent = set_entry_agent
+
+        # Stream first agent's execution
+        agent_output = None
+        async for state in current_agent.initiate_agent_astream(query=query, passed_from=passed_from):
+            # Yield intermediate states
+            yield state
+
+            # Unwrap state if needed
+            actual_state = state
+            if isinstance(state, tuple) and len(state) > 1:
+                maybe = state[1]
+                if isinstance(maybe, dict) and maybe:
+                    actual_state = next(iter(maybe.values()), maybe)
+                else:
+                    actual_state = maybe
+
+            # Keep track of final output
+            if actual_state and isinstance(actual_state, dict):
+                agent_output = actual_state
+
+        # Update state after first agent
+        if agent_output:
+            await self._update_state(
+                message='|'.join(str(output.get('content', output.get('tool_output', '')))
+                                for output in agent_output.get('messages', [])[-memory_order:]),
+                agent=current_agent.agent_name,
+                input=agent_output.get('answer', ''),
+                reasoning=agent_output.get('reasoning', '')
+            )
+
+        # Continue delegation chain with streaming
+        while agent_output and agent_output.get('delegate_to_agent'):
+            try:
+                next_agent: Agent = self.agentManager.agents[agent_output['delegate_to_agent'].lower()]
+            except Exception as e:
+                raise ValueError(f"Agent '{agent_output.get('delegate_to_agent')}' not found: {e}")
+
+            # Build delegation prompt
+            agent_prompt = (
+                f"TASK IS DELEGATED TO YOU BY {self.state['last_agent']}\n\n"
+                f"<REASONING OF {self.state['last_agent']} AGENT>: {self.state['agent_reasoning']}\n\n"
+                f"<LAST AGENT ANSWERS>: {self.state['last_agent_answers']}\n\n"
+                f"<ORIGINAL QUESTION>: {query}"
+            )
+
+            # Stream next agent's execution
+            agent_output = None
+            async for state in next_agent.initiate_agent_astream(query=agent_prompt, passed_from=self.state['last_agent']):
+                # Yield intermediate states
+                yield state
+
+                # Unwrap state if needed
+                actual_state = state
+                if isinstance(state, tuple) and len(state) > 1:
+                    maybe = state[1]
+                    if isinstance(maybe, dict) and maybe:
+                        actual_state = next(iter(maybe.values()), maybe)
+                    else:
+                        actual_state = maybe
+
+                # Keep track of final output
+                if actual_state and isinstance(actual_state, dict):
+                    agent_output = actual_state
+
+            # Update state after delegation
+            if agent_output:
+                await self._update_state(
+                    message='|'.join(str(output.get('content', output.get('tool_output', '')))
+                                    for output in agent_output.get('messages', [])[-memory_order:]),
+                    agent=next_agent.agent_name,
+                    input=agent_output.get('answer', ''),
+                    reasoning=agent_output.get('reasoning', '')
+                )
+
+        # Yield final state
+        if agent_output:
+            yield agent_output
+
     async def initiate_hierarchical_mas(self, query: str) -> Dict[str, Any]:
             """Initiate a task using the async TaskManager."""
             if not self.task_manager:

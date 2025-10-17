@@ -1,6 +1,6 @@
 import os, json
 from typing import List, Tuple, Type, Union, Literal, Dict, Optional, Callable
-from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, PromptTemplate, SystemMessagePromptTemplate
+from ..prompts import ChatPromptTemplate, HumanMessagePromptTemplate, PromptTemplate, SystemMessagePromptTemplate
 from ..GenerativeModel.generativeModels import MASGenerativeModel
 from ..Agents.singular_agent import Agent
 from ..pydanticModels.AnswerModel import answermodel
@@ -124,9 +124,10 @@ class AgentManager:
         elif 'all' in data:
             return data['all']
 
-    def create_agent(self, agent_name: str, tools: List[object], agent_details: AgentDetails, 
-                 memory_order: int = 10, long_context: bool = True,long_context_order: int = 20, shared_memory_order: int = 10, 
-                 plan: bool = False,temperature=0.2,context_callable:Optional[Callable]=None,retain_messages_order: int = 10,**kwargs):
+    def create_agent(self, agent_name: str, tools: List[object], agent_details: AgentDetails,
+                 memory_order: int = 10, long_context: bool = True,long_context_order: int = 20, shared_memory_order: int = 10,
+                 plan: bool = False,temperature=0.2,context_callable:Optional[Callable]=None,retain_messages_order: int = 10,
+                 max_tool_output_words: int = 3000, **kwargs):
         """Create and register a new agent in the AgentManager.
 
         Args:
@@ -140,6 +141,7 @@ class AgentManager:
             plan (bool, optional): Include planner if True. Defaults to False.
             context_callable (Optional[Callable]): Callable that uses user input to give more context to the llm during inference.
             retain_messages_order (int, optional): Number of past interactions to keep in memory for an agent's internal state across multiple queries. Defaults to 10.
+            max_tool_output_words (int, optional): Maximum number of words from tool output to include in LLM prompts. Defaults to 3000.
             
             **kwargs: Additional keyword arguments.  Can include:
                 - `config_dict` (dict, optional): A dictionary specifying memory order overrides for individual LLMs.
@@ -183,6 +185,9 @@ class AgentManager:
         tool_mapping = {tool.name: tool for tool in tools}
         AnswerFormat = answermodel(tool_names=list(tool_mapping.keys()) + ['None'], tools=tools)
 
+        # Cache JSON schema once at agent creation and attach to the model class
+        AnswerFormat._cached_schema = AnswerFormat.model_json_schema()
+
         # Initialize LLM models
         model_config = self._load_model_config(agent_name)
         llm_args = {"temperature": temperature, "memory_order": memory_order, 
@@ -223,7 +228,7 @@ class AgentManager:
         else:
             llm_planner = None
 
-        agent = Agent(agent_name, llm_router, llm_evaluator, llm_reflector, llm_planner, tool_mapping, AnswerFormat, self.logging, shared_memory_order=shared_memory_order,retain_messages_order=retain_messages_order)
+        agent = Agent(agent_name, llm_router, llm_evaluator, llm_reflector, llm_planner, tool_mapping, AnswerFormat, self.logging, shared_memory_order=shared_memory_order,retain_messages_order=retain_messages_order, max_tool_output_words=max_tool_output_words)
         self.agents[agent_name.lower()] = agent
         self.agent_prompts[agent_name.lower()] = system_prompt
     def _compile_agents(self,type='decentralized',agent_context:dict=None):

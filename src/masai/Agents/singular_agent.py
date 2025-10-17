@@ -17,12 +17,27 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
                  tool_mapping: Optional[Dict[str, Any]] = None, # Use Any for Langchain tools, or specific Tool type
                  AnswerFormat: Optional[Type[BaseModel]] = None,
                  logging: bool = True, agent_context: Optional[Dict[str, Any]] = None, shared_memory_order: int = 5,
-                 retain_messages_order: int = 30, **kwargs):
+                 retain_messages_order: int = 30, max_tool_output_words: int = 3000, **kwargs):
 
         """Initialize an async agent with router-evaluator-reflector architecture and optional planner.
         Inherits async execute_tool from BaseAgent.
+
+        Args:
+            agent_name: Name of the agent
+            llm_router: LLM for router node
+            llm_evaluator: LLM for evaluator node
+            llm_reflector: LLM for reflector node
+            llm_planner: Optional LLM for planner node
+            tool_mapping: Dictionary of available tools
+            AnswerFormat: Pydantic model for structured output (with _cached_schema attribute)
+            logging: Enable logging
+            agent_context: Context dictionary for the agent
+            shared_memory_order: Number of messages to keep in shared memory
+            retain_messages_order: Number of messages to retain across executions
+            max_tool_output_words: Maximum number of words from tool output to include in LLM prompts (default: 3000)
+            **kwargs: Additional keyword arguments (e.g., max_tool_loop)
         """
-        super().__init__(agent_name, logging, shared_memory_order, retain_messages_order)
+        super().__init__(agent_name, logging, shared_memory_order, retain_messages_order, max_tool_output_words)
         self.llm_router = llm_router
         self.llm_evaluator = llm_evaluator
         self.llm_reflector = llm_reflector
@@ -62,7 +77,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
         # Prepare arguments for the threaded call
         llm_call_args = {
             "prompt": prompt,
-            "output_structure": self.pydanticmodel,
+            "output_structure": self.pydanticmodel,  # Contains _cached_schema attribute
             "agent_context": self.agent_context,
             "agent_name": self.agent_name,
             "component_context": component_context or [],
@@ -185,9 +200,11 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
                 "last_answer": last_answer,
                 "last_reasoning": last_reasoning,
                 "satisfied": state.get("satisfied", False),
-                "tool_output": state.get("tool_output", "N/A"),
-                "current_tool": state.get("current_tool", "N/A"),
-                "tool_input": state.get("tool_input", "N/A"),
+                "tool_output": state.get("tool_output", None),
+                "current_tool": state.get("current_tool", None),
+                "tool_input": state.get("tool_input", None),
+                "tool_decided_by": state.get("tool_decided_by", None),
+                "previous_node": state.get("previous_node",None),
                 # Don't retain counters (fresh start for each query)
             }
 
@@ -210,7 +227,13 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
 
     async def _format_node_prompt(self, state: State, node: str) -> str:
         """Format the prompt for a specific node (synchronous)."""
-        tool_output = state.get('tool_output', 'N/A') # Default if no tool output yet
+        # Get tool output from state (full version stored in state)
+        tool_output_raw = state.get('tool_output', 'N/A')
+
+        # Truncate tool output for LLM prompt to prevent excessive token usage
+        # Full output remains in state for reference
+        tool_output = self._truncate_tool_output(tool_output_raw)
+
         # Use current_question from state instead of messages[0]['content']
         original_question = state.get('current_question', 'No original question found.')
         tool_input = state.get('tool_input', 'N/A')
@@ -256,7 +279,8 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
              return ROUTER_NODE_PROMPT.format(
                     warning=warning,
                     original_question=original_question,
-                    plan_str=plan_str
+                    plan_str=plan_str,
+                    tool_output=tool_output,
                 )
 
 
@@ -280,9 +304,21 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
              component_context = self.llm_evaluator.chat_history[-self.shared_memory_order:]
         elif prev_node == 'reflector' and self.llm_reflector:
              component_context = self.llm_reflector.chat_history[-self.shared_memory_order:]
+        elif prev_node == "execute_tool":
+            tool_decided_by = state.get('tool_decided_by')
+            if tool_decided_by == 'router' and self.llm_router:
+                pass
+            elif tool_decided_by == 'evaluator' and self.llm_evaluator:
+                component_context = self.llm_evaluator.chat_history[-self.shared_memory_order:]
+            elif tool_decided_by == 'reflector' and self.llm_reflector:
+                component_context = self.llm_reflector.chat_history[-self.shared_memory_order:]
         else:
             # Priority 2: Fallback to state messages
-            component_context = state.get('messages', [])[-self.shared_memory_order:]
+            if prev_node != 'router': # Log only if not coming from router (common on first loop)
+                component_context = state.get('messages', [])[-self.shared_memory_order:]
+                # remove the last messae since it's same as query. We are providing query separately to prompt.
+                component_context = component_context[:-1]
+
 
         prompt = await self._format_node_prompt(state=state, node='router')
         return await self.node_handler(state, self.llm_router, prompt, component_context=component_context, node='router')
@@ -314,7 +350,8 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
         elif prev_node == 'router' and self.llm_router: component_context = self.llm_router.chat_history[-self.shared_memory_order:]
         elif prev_node == 'planner' and self.llm_planner: component_context = self.llm_planner.chat_history[-self.shared_memory_order:]
         else:
-            component_context = state.get('messages', [])[-self.shared_memory_order:]
+            if prev_node!= 'evaluator': # Log only if not coming from router (common on first loop)
+                component_context = state.get('messages', [])[-self.shared_memory_order:]
 
 
         prompt = await self._format_node_prompt(state=state, node='evaluator')
@@ -343,7 +380,8 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
              elif tool_decided_by == 'evaluator' and self.llm_evaluator:
                  component_context = self.llm_evaluator.chat_history[-self.shared_memory_order:]
         else:
-            component_context = state.get('messages', [])[-self.shared_memory_order:]
+            if prev_node!="reflector": # Log only if not coming from reflector (common on first loop)
+                component_context = state.get('messages', [])[-self.shared_memory_order:]
 
 
         prompt = await self._format_node_prompt(state=state, node='reflector')
@@ -469,7 +507,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
                 current_tool=self.retained_state.get("current_tool", ""), tool_input=self.retained_state.get("tool_input", None), tool_output=self.retained_state.get("tool_output", ""), answer=self.retained_state.get("last_answer", ""),
                 satisfied=False, reasoning="", delegate_to_agent=None,
                 current_node='planner' if self.plan else 'router',
-                previous_node=previous_node, plan={}, passed_from=passed_from,
+                previous_node=self.retained_state.get("previous_node", None), plan={}, passed_from=passed_from,
                 reflection_counter=0, tool_loop_counter=0, tool_decided_by=None,
                 current_question=new_query  # Track current question
             )
@@ -542,7 +580,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
                 current_tool=self.retained_state.get("current_tool", ""), tool_input=self.retained_state.get("tool_input", None), tool_output=self.retained_state.get("tool_output", ""), answer=self.retained_state.get("last_answer", ""),
                 satisfied=False, reasoning="", delegate_to_agent=None,
                 current_node='planner' if self.plan else 'router',
-                previous_node=previous_node, plan={}, passed_from=passed_from,
+                previous_node=self.retained_state.get("previous_node", None), plan={}, passed_from=passed_from,
                 reflection_counter=0, tool_loop_counter=0, tool_decided_by=None,
                 current_question=new_query  # Track current question
             )

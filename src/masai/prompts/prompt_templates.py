@@ -147,6 +147,8 @@ ROUTER_NODE_PROMPT = (
     "=== CONTEXT ===\n"
     "ORIGINAL QUESTION:\n{original_question}\n"
     "{plan_str}\n"
+    "\n\n"
+    "<PREVIOUS TOOL OUTPUT START>\n{tool_output}\n<PREVIOUS TOOL OUTPUT END>\n"
     "=== END CONTEXT ===\n\n"
     )
 def get_agent_prompts() -> tuple[str, str, str]:

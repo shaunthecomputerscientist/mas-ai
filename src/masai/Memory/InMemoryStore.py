@@ -12,7 +12,7 @@ except ImportError:
 
 # Optional import for LangChain Document compatibility
 # try:
-from langchain.schema.document import Document
+from ..schema import Document
 # except ImportError:
 #     Document = None  # Fallback if LangChain isn’t installed
 
@@ -74,11 +74,17 @@ class InMemoryDocStore:
     def _normalize_doc(self, doc: Union[str, dict, Document]) -> dict:
         """Convert a document (str, dict, or Document) to a standard dict format."""
         if isinstance(doc, str):
-            return {'page_content': doc}
+            return {'page_content': doc, 'metadata': {}}
         elif isinstance(doc, dict):
+            # Ensure dict has both page_content and metadata keys
+            if 'page_content' not in doc:
+                raise ValueError("Dict document must have 'page_content' key")
+            if 'metadata' not in doc:
+                doc['metadata'] = {}
             return doc
         elif Document is not None and isinstance(doc, Document):
-            return {'page_content': doc.page_content}
+            # Preserve both page_content and metadata from Document objects
+            return {'page_content': doc.page_content, 'metadata': doc.metadata}
         else:
             raise ValueError(f"Unsupported document type: {type(doc)}")
 

@@ -1,4 +1,4 @@
-from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, PromptTemplate, SystemMessagePromptTemplate
+from ..prompts import ChatPromptTemplate, HumanMessagePromptTemplate, PromptTemplate, SystemMessagePromptTemplate
 from typing import List, Dict, Any, Literal, TypedDict, Tuple, Union, Type, Optional, Callable, Awaitable
 from pydantic import BaseModel, Field
 import json

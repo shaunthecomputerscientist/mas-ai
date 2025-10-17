@@ -1,8 +1,8 @@
 {
     "all":{
         "router": {
-            "model_name": "gemini-2.5-flash",
-            "category": "gemini",
+            "model_name": "gpt-5",
+            "category": "openai",
             "description": "OpenAI GPT-4o-mini for fast routing decisions"
         },
         "evaluator": {

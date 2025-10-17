@@ -4,15 +4,91 @@
 
 MAS-AI now supports **dynamic `return_direct` control** for tools, allowing you to decide at runtime whether a tool's output should be returned directly to the user or passed through the evaluation pipeline.
 
+## ⚠️ Reserved Parameter in MASAI System
+
+**IMPORTANT:** `return_direct` is a **reserved parameter** in the MASAI framework.
+
+### What "Reserved" Means
+
+The framework automatically:
+- ✅ **Extracts** `return_direct` from tool inputs and return values
+- ✅ **Processes** the routing logic (skip evaluation vs. go through pipeline)
+- ✅ **Removes** `return_direct` from the actual data passed to the tool
+- ✅ **Implements** the three-level priority system
+- ✅ **Logs** the source of `return_direct` (decorator/parameter/return value)
+
+### What This Means for Tool Developers
+
+**You CAN:**
+- 🔹 Add `return_direct` as a parameter to your tool function
+- 🔹 Return `{"data": ..., "return_direct": True}` from your tool
+- 🔹 Use `return_direct` in the `@tool` decorator
+- 🔹 Let the LLM pass `return_direct` in tool_input
+
+**You DON'T NEED TO:**
+- ❌ Implement any special logic to handle `return_direct`
+- ❌ Check the value of `return_direct` in your tool code
+- ❌ Worry about routing or state management
+- ❌ Remove `return_direct` from your return value
+
+**The framework handles everything automatically!**
+
+### Framework Behavior
+
+```python
+# What happens in the framework (base_agent.py):
+
+# 1. Tool is called with input
+tool_input = {"query": "SELECT * FROM users", "return_direct": True}
+
+# 2. Framework extracts return_direct BEFORE calling tool
+input_return_direct = tool_input.get('return_direct')  # True
+clean_tool_input = {k: v for k, v in tool_input.items() if k != 'return_direct'}
+
+# 3. Tool receives clean input (without return_direct)
+result = tool.invoke(clean_tool_input)  # Tool doesn't see return_direct
+
+# 4. Framework checks return value for return_direct
+if isinstance(result, dict) and 'return_direct' in result:
+    result_return_direct = result['return_direct']
+    actual_result = {k: v for k, v in result.items() if k != 'return_direct'}
+else:
+    result_return_direct = None
+    actual_result = result
+
+# 5. Framework implements priority hierarchy
+if result_return_direct is not None:
+    should_return_direct = result_return_direct
+elif input_return_direct is not None:
+    should_return_direct = input_return_direct
+else:
+    should_return_direct = tool.return_direct  # Decorator
+
+# 6. Framework routes accordingly
+if should_return_direct:
+    state['answer'] = actual_result
+    state['satisfied'] = True
+    # Go directly to END
+else:
+    state['tool_output'] = actual_result
+    # Go to evaluator
+```
+
 ## How It Works
 
 ### Three Levels of `return_direct` Control
 
-1. **Decorator Level (Static)**: Set in the `@tool` decorator
-2. **Parameter Level (Dynamic)**: Passed as a tool argument at runtime
-3. **Return Value Level (Runtime)**: Decided internally during tool execution
+1. **Decorator Level (Static)**: Set in the `@tool` decorator - **LOWEST PRIORITY**
+2. **Argument Level (Dynamic)**: Passed as a tool argument at runtime - **MEDIUM PRIORITY**
+3. **Return Value Level (Runtime)**: Decided internally during tool execution - **HIGHEST PRIORITY**
 
-**Priority:** Return Value > Parameter > Decorator
+**Priority:** Return Value > Argument > Decorator
+
+**Important:**
+- If return value contains `return_direct`, it takes precedence over everything
+- If return value does NOT contain `return_direct`, precedence is between argument and decorator (argument wins)
+- If argument is `None` (not provided), decorator is used
+- Each level can be `None` (not provided), causing fallback to the next level
 
 ---
 
@@ -423,17 +499,41 @@ Tool 'File Reader' requested return_direct (decorator). Setting final answer.
 
 | Feature | Description |
 |---------|-------------|
-| **Decorator `return_direct`** | Static setting in `@tool()` decorator |
-| **Parameter `return_direct`** | Dynamic setting in tool arguments |
-| **Priority** | Parameter > Decorator |
+| **Reserved Parameter** | `return_direct` is automatically handled by the framework |
+| **Decorator `return_direct`** | Static setting in `@tool()` decorator (lowest priority) |
+| **Parameter `return_direct`** | Dynamic setting in tool arguments (medium priority) |
+| **Return Value `return_direct`** | Runtime decision in tool return value (highest priority) |
+| **Priority** | Return Value > Parameter > Decorator |
 | **Default Behavior** | `False` (goes through evaluation) |
 | **Use Cases** | Raw data queries, file operations, API calls |
-| **Benefits** | Flexibility, efficiency, LLM control |
+| **Benefits** | Flexibility, efficiency, LLM control, automatic handling |
+| **Framework Handling** | Automatic extraction, routing, and state management |
+
+---
+
+## Key Takeaways
+
+1. ✅ **`return_direct` is reserved** - The framework handles it automatically
+2. ✅ **Three-level priority** - Return Value > Parameter > Decorator
+3. ✅ **No special logic needed** - Just add the parameter or return the key
+4. ✅ **Automatic extraction** - Framework removes `return_direct` from tool input/output
+5. ✅ **Flexible control** - LLM, tool, or developer can decide
+6. ✅ **Backward compatible** - Existing tools continue to work
+
+---
+
+## Related Documentation
+
+- [RETURN_DIRECT_PRIORITY_SYSTEM.md](RETURN_DIRECT_PRIORITY_SYSTEM.md) - Detailed priority system explanation
+- [ARGUMENT_BEHAVIOR_EXPLANATION.md](ARGUMENT_BEHAVIOR_EXPLANATION.md) - Python argument behavior
+- [README.md](../README.md#2-dynamic-return_direct-for-tools) - Quick reference in main documentation
 
 ---
 
 ## Version
 
 - **Added in:** v0.2.5
+- **Enhanced in:** v0.3.0 (Three-level priority system)
+- **Documented as Reserved:** v0.3.4
 - **Status:** Production Ready ✅
 

@@ -21,3 +21,5 @@ test.py
 webtest.py
 masai_server.py
 __pycache__
+tests
+examples

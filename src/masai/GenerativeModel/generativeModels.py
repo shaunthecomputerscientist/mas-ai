@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from typing import Dict, List, Literal, Type, Tuple, Callable
 from typing import Optional
-from langchain.schema import Document
+from ..schema import Document
 from datetime import datetime
 from ..Memory.InMemoryStore import InMemoryDocStore
 from ..GenerativeModel.baseGenerativeModel.basegenerativeModel import BaseGenerativeModel
@@ -72,9 +72,9 @@ class GenerativeModel(BaseGenerativeModel):
 
 class MASGenerativeModel(BaseGenerativeModel):
     def __init__(
-        self, 
-        model_name: str, 
-        temperature: float, 
+        self,
+        model_name: str,
+        temperature: float,
         category: str,
         prompt_template = None,
         memory_order: int = 5,
@@ -121,28 +121,31 @@ class MASGenerativeModel(BaseGenerativeModel):
         self.streaming = streaming
         self.streaming_callback = streaming_callback
         self.context_callable=context_callable
-        
-        
+
+
         self.long_context = long_context
         if self.long_context:
             self.llm_long_context = GenerativeModel(model_name=self.model_name,category=self.category,temperature=0.5,memory=False)
             self.context_summaries: List= []
         else:
             self.llm_long_context, self.context_summaries = None, None
-            
-            
+
+
         self.long_context_order = long_context_order
-        
+
         self.LTIMStore : InMemoryDocStore= kwargs.get('memory_store')
-            
+
         if self.LTIMStore and self.long_context:
             if not kwargs['memory_store']:
                 raise ValueError('InMemoryDocStore instance must be Provided.')
             else:
                 self.LTIMStore = kwargs['memory_store']
         else:
-            self.LTIMStore=None            
+            self.LTIMStore=None
         self.chat_log = chat_log
+
+        # Cache for performance optimization (only for info, not schema)
+        self._cached_formatted_info = None  # Will be set on first use
         
     async def _update_long_context(self, messages: List[Dict[str, str]]) -> List:
         """
@@ -200,8 +203,8 @@ class MASGenerativeModel(BaseGenerativeModel):
 
 
     async def generate_response_mas(
-        self, 
-        prompt: str, 
+        self,
+        prompt: str,
         output_structure: Type[BaseModel],
         agent_context: Optional[dict] = None,
         agent_name: Optional[str] = "assistant",
@@ -210,10 +213,10 @@ class MASGenerativeModel(BaseGenerativeModel):
     ):
         """
         MAS-specific response generation with agent context support.
-        
+
         Args:
             prompt: The input prompt
-            output_structure: Pydantic model for structured output (AnswerFormat)
+            output_structure: Pydantic model for structured output (AnswerFormat with _cached_schema attribute)
             agent_context: Dictionary containing information about other agents
             agent_name: Name of the current agent
             component_context: Additional context messages from previous components
@@ -237,19 +240,27 @@ class MASGenerativeModel(BaseGenerativeModel):
         
         
 
-        # Prepare MAS-specific inputs
+        # # Prepare MAS-specific inputs
+        # start_formating_time = time.time()
+
+
+        # Cache formatted info if it hasn't changed
+        if self._cached_formatted_info is None or self._cached_formatted_info != str(list(self.info.items())):
+            self._cached_formatted_info = str(list(self.info.items())) if self.info else "None"
+
         mas_inputs = {
-            "useful_info": str([self.info.items() if self.info else None]),
+            "useful_info": self._cached_formatted_info,
             "current_time": datetime.now().strftime("%A, %B %d, %Y, %I:%M %p"),
             "question": prompt,
             "long_context": self.context_summaries if not in_memory_store_data else in_memory_store_data.extend(self.context_summaries),
             "history": self.chat_history,
-            "schema": output_structure.model_json_schema(),
+            "schema": getattr(output_structure, '_cached_schema', None) or output_structure.model_json_schema(),  # From output_structure._cached_schema
             "coworking_agents_info": agent_context if agent_context is not None else "NO AGENTS PRESENT"
         }
         
         try:
             # print("\n\n\n\n",self.prompt.format(**mas_inputs),"\n\n")
+            # print("END FORMAT TIME", time.time()-start_formating_time)
             # Use the prompt template with MAS-specific inputs
             if self.logger:
                 startapi=time.time()
@@ -268,10 +279,12 @@ class MASGenerativeModel(BaseGenerativeModel):
                 self.logger.debug(f"LLM Api response time {time.time()-startapi}")
                 self.logger.info(f"Returned Response : {response}")
             
-            # Update chat history with structured response
-            
-            if isinstance(response, dict) and 'answer' in response:
+            # Update chat history with structured response and last question/prompt
+            self.chat_history.append({'role': role, 'content': prompt})
+            if isinstance(response, dict) and 'answer' in response and response['answer'] is not None:
                 self.chat_history.append({'role': agent_name, 'content': response['answer']})
+            elif isinstance(response, dict) and 'reasoning' in response and response['reasoning'] is not None:
+                self.chat_history.append({'role': agent_name, 'content': response['reasoning']})
             
             # print("returning response", time.time()-start)
             
@@ -294,26 +307,45 @@ class MASGenerativeModel(BaseGenerativeModel):
 
     
     async def _update_component_context(self, component_context, role, prompt):
-        if component_context:
-            # Check for duplicate tool outputs and truncate if found
-            if self._has_duplicate_tool_output(component_context, prompt):
-                # Truncate tool outputs in component context messages
+        # import time
+        # start_time = time.time()
+
+        # Extract tool output from current prompt once
+        tool_output_in_prompt = self._extract_tool_output_from_prompt(prompt)
+
+        if tool_output_in_prompt:
+            # Truncate overlapping tool outputs in component context messages
+            if component_context:
                 truncated_context = []
                 for message in component_context:
-                    # Defensive check: ensure message is a dict with content key
                     if not isinstance(message, dict) or 'content' not in message:
-                        truncated_context.append(message)  # Keep as-is if malformed
+                        truncated_context.append(message)
                         continue
+
+                    content = message.get('content', '')
+                    if content is None:
+                        content = ''
+
                     truncated_message = message.copy()
-                    truncated_message['content'] = self._truncate_tool_output_in_content(
-                        message.get('content', '')
-                    )
+                    truncated_message['content'] = self._truncate_overlapping_tool_output(content, tool_output_in_prompt)
                     truncated_context.append(truncated_message)
                 component_context = truncated_context
+
+            # Also truncate tool outputs in existing chat_history to avoid duplication
+            # This handles both tagged tool outputs AND untagged content that overlaps
+            # history_truncate_start = time.time()
+            self.chat_history = [
+                {'role': msg.get('role', ''), 'content': self._truncate_overlapping_tool_output(msg.get('content', '') or '', tool_output_in_prompt)}
+                if isinstance(msg, dict) else msg
+                for msg in self.chat_history
+            ]
+
+            # print(f"⏱️ CONTEXT FILTERING TIME: Total={time.time()-start_time:.4f}s | Component={len(component_context or [])} msgs | History={len(self.chat_history)} msgs | Time={time.time()-history_truncate_start:.4f}s")
+
+        if component_context:
             self.chat_history.extend(component_context)
-            self.chat_history.append({'role': role, 'content': prompt})
-        else:
-            self.chat_history.append({'role': role, 'content': prompt})
+        # else:
+        #     self.chat_history.append({'role': role, 'content': prompt})
 
 
 
@@ -380,60 +412,113 @@ class MASGenerativeModel(BaseGenerativeModel):
         else:
             return None
         
-    def _truncate_tool_output_in_content(self, content: str, max_words: int = 30) -> str:
+    def _extract_tool_output_from_prompt(self, prompt: str) -> str:
         """
-        Truncate tool output within <PREVIOUS TOOL OUTPUT START>...<PREVIOUS TOOL OUTPUT END> tags.
+        Extract tool output content from prompt's <PREVIOUS TOOL OUTPUT START>...<END> tags.
+        Args:
+            prompt: The prompt that may contain tool output tags
+        Returns:
+            Extracted tool output content, or empty string if not found
+        """
+        import re
+        pattern = r'<PREVIOUS TOOL OUTPUT START>\n(.*?)\n<PREVIOUS TOOL OUTPUT END>'
+        match = re.search(pattern, prompt, re.DOTALL)
+        return match.group(1).strip() if match else ''
+
+    def _check_overlap(self, text1: str, text2: str, min_chunk_words: int = 20) -> bool:
+        """
+        Check if two texts have significant overlap by finding common word chunks.
+        Returns True if at least min_chunk_words consecutive words match.
+        """
+        if not text1 or not text2:
+            return False
+
+        words1 = text1.split()
+        words2 = text2.split()
+
+        if len(words1) < min_chunk_words or len(words2) < min_chunk_words:
+            # If either text is too short, check if shorter one is substring of longer
+            shorter = text1 if len(words1) < len(words2) else text2
+            longer = text2 if len(words1) < len(words2) else text1
+            return shorter in longer
+
+        # Check if any chunk of min_chunk_words from text1 appears in text2
+        for i in range(len(words1) - min_chunk_words + 1):
+            chunk = ' '.join(words1[i:i + min_chunk_words])
+            if chunk in text2:
+                return True
+
+        return False
+
+    def _truncate_overlapping_tool_output(self, content: str, tool_output_reference: str, max_words: int = 30) -> str:
+        """
+        Truncate tool output in content if it overlaps with reference.
+        Handles both tagged tool outputs and untagged content that contains tool output.
+
         Args:
             content: Message content that may contain tool output
+            tool_output_reference: The reference tool output from current prompt
             max_words: Maximum number of words to keep in tool output
         Returns:
-            Content with truncated tool output
+            Content with truncated tool output if overlap found, otherwise unchanged
         """
+        if not content or not isinstance(content, str) or not tool_output_reference:
+            return content or ''
+
         import re
-        # Pattern to match tool output sections
+
+        # Clean reference (remove "..." for comparison)
+        reference_clean = tool_output_reference.rstrip('.')
+
+        # Pattern for tagged tool outputs
         pattern = r'<PREVIOUS TOOL OUTPUT START>\n(.*?)\n<PREVIOUS TOOL OUTPUT END>'
-        def truncate_match(match):
-            tool_output = match.group(1)
-            words = tool_output.split()
-            if len(words) <= max_words:
-                return match.group(0)  # Return original if already short enough
-            truncated = ' '.join(words[:max_words])
-            return f'<PREVIOUS TOOL OUTPUT START>\n{truncated}...\n<PREVIOUS TOOL OUTPUT END>'
-        return re.sub(pattern, truncate_match, content, flags=re.DOTALL)
-    def _has_duplicate_tool_output(self, component_context, current_prompt):
-        """
-        Check if component context contains the same tool output as current prompt.
-        Args:
-            component_context: List of context messages
-            current_prompt: Current prompt content
-        Returns:
-            True if duplicate tool output found
-        """
-        import re
-        # Extract tool output from current prompt
-        current_pattern = r'<PREVIOUS TOOL OUTPUT START>\n(.*?)\n<PREVIOUS TOOL OUTPUT END>'
-        current_match = re.search(current_pattern, current_prompt, re.DOTALL)
-        if not current_match:
-            return False
-        current_tool_output = current_match.group(1).strip()
-        # Check if any message in component context has the same tool output
-        for message in component_context:
-            # Defensive check: ensure message is a dict with content key
-            if not isinstance(message, dict) or 'content' not in message:
-                continue
-            content = message.get('content', '')
-            if content is None:
-                continue
-            context_matches = re.findall(current_pattern, content, re.DOTALL)
-            for context_tool_output in context_matches:
-                if context_tool_output.strip() == current_tool_output:
-                    return True
-        return False
+
+        def truncate_if_overlapping(match):
+            tool_output = match.group(1).strip()
+
+            # Check if already truncated
+            if tool_output.endswith('...'):
+                return match.group(0)
+
+            # Clean tool output
+            tool_output_clean = tool_output.rstrip('.')
+
+            # Check overlap in BOTH directions (handles truncated vs full)
+            has_overlap = (self._check_overlap(tool_output_clean, reference_clean) or
+                          self._check_overlap(reference_clean, tool_output_clean))
+
+            if has_overlap:
+                words = tool_output.split()
+                if len(words) <= max_words:
+                    return match.group(0)  # Already short enough
+
+                # Truncate
+                truncated = ' '.join(words[:max_words])
+                return f'<PREVIOUS TOOL OUTPUT START>\n{truncated}...\n<PREVIOUS TOOL OUTPUT END>'
+
+            return match.group(0)  # No overlap
+
+        # First, handle tagged tool outputs
+        modified_content = re.sub(pattern, truncate_if_overlapping, content, flags=re.DOTALL)
+
+        # Second, check if untagged content contains large chunks of tool output
+        # (e.g., LLM directly outputting tool results in its response)
+        if modified_content == content and '<PREVIOUS TOOL OUTPUT' not in content:  # No tagged outputs
+            # Check if content itself (without tags) overlaps with reference
+            content_clean = content.rstrip('.')
+            if self._check_overlap(content_clean, reference_clean, min_chunk_words=30):
+                # Large overlap found in untagged content - truncate the entire content
+                words = content.split()
+                if len(words) > max_words:
+                    truncated = ' '.join(words[:max_words])
+                    return f'{truncated}... [truncated - overlaps with tool output]'
+
+        return modified_content
 
 
     async def astream_response_mas(
-        self, 
-        prompt: str, 
+        self,
+        prompt: str,
         output_structure: Type[BaseModel],
         agent_context: Optional[dict] = None,
         agent_name: Optional[str] = "assistant",
@@ -442,10 +527,10 @@ class MASGenerativeModel(BaseGenerativeModel):
     ):
         """
         MAS-specific response generation with streaming support.
-        
+
         Args:
             prompt: The input prompt
-            output_structure: Pydantic model for structured output
+            output_structure: Pydantic model for structured output (AnswerFormat with _cached_schema attribute)
             agent_context: Dictionary containing information about other agents
             agent_name: Name of the current agent
             component_context: Additional context messages from previous components
@@ -464,13 +549,18 @@ class MASGenerativeModel(BaseGenerativeModel):
         await self._update_component_context(component_context=component_context, role=role, prompt=prompt)
 
         # Prepare MAS-specific inputs
+        # Extract cached schema from output_structure (attached at agent creation)
+
+        if self._cached_formatted_info is None or self._cached_formatted_info != str(list(self.info.items())):
+            self._cached_formatted_info = str(list(self.info.items())) if self.info else "None"
+
         mas_inputs = {
-            "useful_info": str([self.info.items() if self.info else 'None']),
+            "useful_info": self._cached_formatted_info,
             "current_time": datetime.now().strftime("%A, %B %d, %Y, %I:%M %p"),
             "question": prompt,
             "long_context": self.context_summaries if not in_memory_store_data else in_memory_store_data.extend(self.context_summaries),
             "history": self.chat_history,
-            "schema": output_structure.model_json_schema(),
+            "schema": getattr(output_structure, '_cached_schema', None) or output_structure.model_json_schema(),  # From output_structure._cached_schema
             "coworking_agents_info": agent_context if agent_context is not None else "No agents present"
         }
         
@@ -503,9 +593,12 @@ class MASGenerativeModel(BaseGenerativeModel):
             else:
                 response_dict = final_response
                 
-            # Update chat history with the complete response
-            if isinstance(response_dict, dict) and 'answer' in response_dict:
+            # Update chat history with the complete response or last question/prompt
+            self.chat_history.append({'role': role, 'content': prompt})
+            if isinstance(response_dict, dict) and 'answer' in response_dict and response_dict['answer'] is not None:
                 self.chat_history.append({'role': agent_name, 'content': response_dict['answer']})
+            elif isinstance(response_dict, dict) and 'reasoning' in response_dict and response_dict['reasoning'] is not None:
+                self.chat_history.append({'role': agent_name, 'content': response_dict['reasoning']})
             
             return response_dict
             

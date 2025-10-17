@@ -4,8 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 from ..MultiAgents.MultiAgent import MultiAgentSystem
 from ..GenerativeModel.generativeModels import BaseGenerativeModel
 from ..GenerativeModel.generativeModels import MASGenerativeModel  # Assuming this is the path to your LLM class
-from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate, PromptTemplate, SystemMessagePromptTemplate
-from langchain_core.documents import Document
+from ..prompts import ChatPromptTemplate, HumanMessagePromptTemplate, PromptTemplate, SystemMessagePromptTemplate
+from ..schema import Document
 from ..pydanticModels.omanModel import structure_oman_supervisor
 
 

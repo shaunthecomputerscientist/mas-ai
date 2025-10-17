@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: masai_framework
-Version: 0.2.9
+Version: 0.3.5
 Summary: Multi-Agent System Framework for AI Agents with Custom LangGraph Implementation
 Author-email: PILER <mrpolymathematica@gmail.com>
 Requires-Python: >=3.9
@@ -1408,6 +1408,20 @@ print(response)
 
 Control whether tool outputs are returned directly to the user or passed through the evaluation pipeline. Supports three levels of control with priority: **Return Value > Parameter > Decorator**.
 
+#### ⚠️ Reserved Parameter in MASAI System
+
+**IMPORTANT:** `return_direct` is a **reserved parameter** in the MASAI framework. The framework automatically:
+- ✅ Extracts `return_direct` from tool inputs and return values
+- ✅ Handles the routing logic (skip evaluation vs. go through pipeline)
+- ✅ Removes `return_direct` from the actual data passed to the tool
+- ✅ Implements the three-level priority system
+
+**What this means for tool developers:**
+- 🔹 You can add `return_direct` as a parameter to your tool function
+- 🔹 You can return `{"data": ..., "return_direct": True}` from your tool
+- 🔹 The framework will automatically handle the behavior
+- 🔹 You don't need to implement any special logic in your tool
+
 #### Three Levels of Control
 
 **1. Decorator Level (Static)**
@@ -1459,15 +1473,40 @@ async def adaptive_query(query: str) -> dict:
         }
 ```
 
-#### Priority Matrix
+#### Priority Hierarchy
 
-| Decorator | Parameter | Return Value | Effective | Winner |
-|-----------|-----------|--------------|-----------|--------|
-| `True` | Not set | Not set | `True` | Decorator |
-| `False` | `True` | Not set | `True` | **Parameter** |
-| `True` | `False` | Not set | `False` | **Parameter** |
-| `True` | `True` | `False` | `False` | **Return Value** |
-| `False` | `False` | `True` | `True` | **Return Value** |
+The framework implements a **strict priority hierarchy** for `return_direct`:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              return_direct PRIORITY HIERARCHY               │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. RETURN VALUE (Highest Priority)                        │
+│     └─ Tool returns: {"data": ..., "return_direct": True}  │
+│        ✅ Overrides everything                              │
+│                                                             │
+│  2. PARAMETER (Medium Priority)                            │
+│     └─ LLM passes: tool_input = {"return_direct": True}    │
+│        ✅ Overrides decorator                               │
+│                                                             │
+│  3. DECORATOR (Lowest Priority)                            │
+│     └─ @tool("name", return_direct=True)                   │
+│        ✅ Used if no higher priority set                    │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Priority Matrix:**
+
+| Decorator | Parameter | Return Value | Effective | Winner | Reason |
+|-----------|-----------|--------------|-----------|--------|--------|
+| `True` | Not set | Not set | `True` | Decorator | Only decorator specified |
+| `False` | `True` | Not set | `True` | **Parameter** | Parameter overrides decorator |
+| `True` | `False` | Not set | `False` | **Parameter** | Parameter overrides decorator |
+| `True` | `True` | `False` | `False` | **Return Value** | Return value has highest priority |
+| `False` | `False` | `True` | `True` | **Return Value** | Return value has highest priority |
+| `True` | Not set | `False` | `False` | **Return Value** | Return value overrides decorator |
 
 #### Use Cases
 
@@ -1497,13 +1536,45 @@ async def read_file(path: str, return_direct: bool = False) -> str:
 # → return_direct=False, evaluator analyzes
 ```
 
+#### How MASAI Handles `return_direct`
+
+The framework automatically processes `return_direct` in the `execute_tool` node:
+
+```python
+# Framework logic (you don't need to implement this)
+# 1. Extract return_direct from three sources
+tool_decorator_return_direct = hasattr(tool, 'return_direct') and tool.return_direct
+input_return_direct = tool_input.get('return_direct') if isinstance(tool_input, dict) else None
+result_return_direct = result.get('return_direct') if isinstance(result, dict) else None
+
+# 2. Implement priority: Return Value > Parameter > Decorator
+if result_return_direct is not None:
+    should_return_direct = result_return_direct
+    source = "return value (runtime decision)"
+elif input_return_direct is not None:
+    should_return_direct = input_return_direct
+    source = "input argument"
+else:
+    should_return_direct = tool_decorator_return_direct
+    source = "decorator"
+
+# 3. If return_direct=True, skip evaluation and go to END
+if should_return_direct:
+    state['answer'] = tool_output
+    state['satisfied'] = True
+    state['current_tool'] = None
+    # Workflow goes directly to END
+```
+
 **Benefits**:
 - ✅ **Flexibility**: Single tool handles both direct and evaluated outputs
 - ✅ **LLM Control**: LLM decides based on user intent
 - ✅ **Efficiency**: Skip unnecessary evaluation for simple queries
 - ✅ **Smart Tools**: Tools can decide internally based on result complexity
+- ✅ **Automatic**: Framework handles all the routing logic
+- ✅ **Reserved**: `return_direct` is automatically extracted and processed
 
-For detailed documentation, see [docs/DYNAMIC_RETURN_DIRECT.md](docs/DYNAMIC_RETURN_DIRECT.md)
+For detailed documentation, see [docs/DYNAMIC_RETURN_DIRECT.md](docs/DYNAMIC_RETURN_DIRECT.md) and [docs/RETURN_DIRECT_PRIORITY_SYSTEM.md](docs/RETURN_DIRECT_PRIORITY_SYSTEM.md)
 
 ---
 

@@ -9,8 +9,12 @@ def repair_json_string(json_str: str) -> str:
     """
     Attempt to repair common JSON string issues:
     1. Invalid escape sequences (\' which is not valid JSON)
-    2. Unescaped control characters (actual newlines, tabs, etc.)
-    3. Missing closing brackets/braces
+    2. Missing closing brackets/braces
+
+    IMPORTANT: This function does NOT escape control characters in field values!
+    - Field values (like code) should be preserved as-is
+    - Only JSON structure issues are fixed
+    - Control characters in values are the responsibility of the LLM to escape
 
     Uses a stack-based approach to determine the correct order of closing characters.
 
@@ -25,72 +29,11 @@ def repair_json_string(json_str: str) -> str:
 
     repairs_made = []
 
-    # Fix 0: Escape unescaped control characters inside JSON strings
-    # JSON spec requires control characters (0x00-0x1F) to be escaped
-    # Common issue: LLM generates actual newlines instead of \n
-    #
-    # IMPORTANT: We need to be very careful here because:
-    # 1. The JSON might contain Python code with nested quotes
-    # 2. We don't want to break the JSON structure
-    # 3. We only want to escape ACTUAL control characters (not \n sequences)
-    #
-    # Strategy: Use a character-by-character approach with proper state tracking
-    def escape_control_chars_safe(json_str):
-        """Safely escape actual control characters in JSON string"""
-        result = []
-        in_string = False
-        escape_next = False
-
-        for i, char in enumerate(json_str):
-            if escape_next:
-                # Previous char was backslash, keep this char as-is
-                result.append(char)
-                escape_next = False
-                continue
-
-            if char == '\\':
-                # Start of escape sequence
-                result.append(char)
-                escape_next = True
-                continue
-
-            if char == '"':
-                # Toggle string state
-                in_string = not in_string
-                result.append(char)
-                continue
-
-            # If we're inside a string and encounter a control character, escape it
-            if in_string and ord(char) < 0x20:
-                if char == '\n':
-                    result.append('\\n')
-                elif char == '\r':
-                    result.append('\\r')
-                elif char == '\t':
-                    result.append('\\t')
-                elif char == '\b':
-                    result.append('\\b')
-                elif char == '\f':
-                    result.append('\\f')
-                else:
-                    # Other control characters - escape as unicode
-                    result.append(f'\\u{ord(char):04x}')
-            else:
-                result.append(char)
-
-        return ''.join(result)
-
-    # Try to escape control characters safely
-    try:
-        # ALWAYS run the escape function if there are ANY control characters
-        # The function is smart enough to only escape actual control chars, not escape sequences
-        has_control_chars = any(ord(c) < 0x20 for c in json_str)
-
-        if has_control_chars:
-            json_str = escape_control_chars_safe(json_str)
-            repairs_made.append("escaped control characters")
-    except Exception as e:
-        logger.warning(f"Failed to escape control characters: {e}")
+    # REMOVED: Control character escaping
+    # Reason: This was too aggressive and modified field values (like code)
+    # The LLM should generate proper JSON with escaped control characters
+    # If the LLM generates actual newlines, json.loads() will fail and we'll
+    # get a clear error message instead of silently corrupting the data
 
     # Fix 1: Handle invalid escape sequences carefully
     # \' is not a valid JSON escape sequence (only \" \\ \/ \b \f \n \r \t \uXXXX are valid)
@@ -366,6 +309,7 @@ def parse_json(text):
     1. Standard JSON parsing
     2. JSON with delimited content (e.g., <PYTHON>code</PYTHON>)
     3. Automatic repair for common JSON issues
+    4. Handling double-escaped sequences (\\\\n → \\n → actual newline)
 
     Returns a dictionary if successful, otherwise raises an error.
     """
@@ -394,23 +338,95 @@ def parse_json(text):
         except json.JSONDecodeError as repair_error:
             raise ValueError(f"Failed to parse JSON. Original error: {e}. Repair attempt also failed: {repair_error}")
 
+def unescape_json_string(s: str) -> str:
+    """
+    Unescape a JSON string value (mimics what json.loads() does).
+
+    This is needed when we manually extract string values from malformed JSON.
+    Standard JSON escape sequences:
+    - \\" → "
+    - \\\\ → \\
+    - \\/ → /
+    - \\b → backspace
+    - \\f → form feed
+    - \\n → newline
+    - \\r → carriage return
+    - \\t → tab
+    - \\uXXXX → unicode character
+
+    Args:
+        s: String with JSON escape sequences
+
+    Returns:
+        Unescaped string
+    """
+    result = []
+    i = 0
+    while i < len(s):
+        if s[i] == '\\' and i + 1 < len(s):
+            next_char = s[i + 1]
+            if next_char == '"':
+                result.append('"')
+                i += 2
+            elif next_char == '\\':
+                result.append('\\')
+                i += 2
+            elif next_char == '/':
+                result.append('/')
+                i += 2
+            elif next_char == 'b':
+                result.append('\b')
+                i += 2
+            elif next_char == 'f':
+                result.append('\f')
+                i += 2
+            elif next_char == 'n':
+                result.append('\n')
+                i += 2
+            elif next_char == 'r':
+                result.append('\r')
+                i += 2
+            elif next_char == 't':
+                result.append('\t')
+                i += 2
+            elif next_char == 'u' and i + 5 < len(s):
+                # Unicode escape: \uXXXX
+                try:
+                    code_point = int(s[i+2:i+6], 16)
+                    result.append(chr(code_point))
+                    i += 6
+                except (ValueError, OverflowError):
+                    # Invalid unicode escape - keep as-is
+                    result.append(s[i])
+                    i += 1
+            else:
+                # Unknown escape sequence - keep the backslash
+                result.append(s[i])
+                i += 1
+        else:
+            result.append(s[i])
+            i += 1
+
+    return ''.join(result)
+
+
 def parse_task_string(task_str: str) -> list[str]:
     """
     Parses a comma-separated string of quoted tasks into individual tasks.
     Handles commas within task descriptions and varying quotation marks.
-    
+
     Args:
         task_str: Input string containing tasks (e.g. '"task 1", "task 2, with comma"')
-        
+
     Returns:
         List of cleaned task strings
     """
     # Remove surrounding brackets if present
     cleaned = task_str.strip('[]')
-    
+
     # Split on commas followed by optional whitespace and a quote
     task_split = re.split(r',(?=\s*["\'])', cleaned)
-    
+
     # Clean whitespace and quotes from each task
     return [task.strip(' "\'') for task in task_split]
 
@@ -580,10 +596,11 @@ def parse_tool_input(tool_input:dict, fields):
 
         # TYPE 4: Quoted strings (most common, most complex)
         if first_char in ['"', "'"]:
-            # Use bracket-counting approach to handle nested structures correctly
+            # ROBUST STRING EXTRACTION with multiple strategies:
+            # 1. Track bracket/brace/paren depth for nested structures
+            # 2. Handle escaped characters properly
+            # 3. Use lookahead to verify closing quotes (handles unescaped quotes from LLM)
 
-            # ROBUST STRING EXTRACTION with bracket counting
-            # This handles ANY nested structure correctly: [], {}, (), nested quotes, etc.
             quote_char = first_char
             value_start = start_pos + 1
             i = value_start
@@ -594,6 +611,38 @@ def parse_tool_input(tool_input:dict, fields):
             bracket_depth = 0  # Track [], {}, () nesting
             paren_depth = 0
             brace_depth = 0
+
+            def is_valid_closing_quote(pos):
+                """
+                Check if a quote at position 'pos' is a valid closing quote.
+                A valid closing quote should be followed by:
+                - Whitespace + comma (next field)
+                - Whitespace + } (end of object)
+                - Whitespace + ] (end of array)
+                - End of string
+
+                This handles cases where LLM generates unescaped quotes inside values.
+                Example: "code": "parts.append("test")"
+                         The quote before "test" is NOT valid (followed by 't')
+                         The final quote IS valid (followed by comma or })
+                """
+                # Look ahead to see what follows this quote
+                j = pos + 1
+                # Skip whitespace
+                while j < len(data) and data[j] in ' \t\n\r':
+                    j += 1
+
+                if j >= len(data):
+                    # End of string - valid closing quote
+                    return True
+
+                next_char = data[j]
+                # Valid if followed by comma, closing brace, or closing bracket
+                if next_char in ',}]':
+                    return True
+
+                # Invalid - probably an unescaped quote inside the value
+                return False
 
             while i < len(data):
                 current_char = data[i]
@@ -646,14 +695,32 @@ def parse_tool_input(tool_input:dict, fields):
 
                 # Check for closing quote
                 if current_char == quote_char:
-                    # Only treat as closing quote if we're at depth 0
-                    if bracket_depth == 0 and brace_depth == 0 and paren_depth == 0:
-                        # This is the real closing quote
-                        value = ''.join(value_chars)
-                        logger.debug(f"Extracted field '{field}' value (length: {len(value)}, depths: [], {{}}, () all 0)")
-                        return value
+                    # Strategy: Check both depth AND lookahead
+                    at_depth_zero = (bracket_depth == 0 and brace_depth == 0 and paren_depth == 0)
+
+                    if at_depth_zero:
+                        # At depth 0 - could be closing quote OR unescaped quote
+                        # Use lookahead to verify
+                        if is_valid_closing_quote(i):
+                            # This is the real closing quote!
+                            value = ''.join(value_chars)
+
+                            # CRITICAL: Unescape JSON escape sequences
+                            # When we manually extract strings, we get the raw escaped form.
+                            # We need to unescape it to match what json.loads() would return.
+                            # Example: "x = 1\\ny = 2" → "x = 1\ny = 2"
+                            value = unescape_json_string(value)
+
+                            logger.debug(f"Extracted field '{field}' value (length: {len(value)}, verified closing quote, unescaped)")
+                            return value
+                        else:
+                            # Unescaped quote inside value - include it
+                            logger.debug(f"Found unescaped quote at position {i} (not followed by comma/brace/bracket)")
+                            value_chars.append(current_char)
+                            i += 1
+                            continue
                     else:
-                        # We're inside nested structure - this quote is part of the value
+                        # Inside nested structure - this quote is part of the value
                         value_chars.append(current_char)
                         i += 1
                         continue
@@ -664,7 +731,11 @@ def parse_tool_input(tool_input:dict, fields):
 
             # Reached end without finding closing quote
             value = ''.join(value_chars)
-            logger.warning(f"No closing quote found for field '{field}', returning value (length: {len(value)})")
+
+            # CRITICAL: Unescape JSON escape sequences even if no closing quote found
+            value = unescape_json_string(value)
+
+            logger.warning(f"No closing quote found for field '{field}', returning value (length: {len(value)}, unescaped)")
             return value
 
         # TYPE 5: Objects {} - extract with bracket counting

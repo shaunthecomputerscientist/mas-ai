@@ -10,6 +10,7 @@ from ..Tools.logging_setup.logger import setup_logger
 from ..Tools.PARSERs.json_parser import parse_tool_input, parse_task_string
 from ..langgraph.graph import StateGraph
 from ..langgraph.graph.state import CompiledStateGraph
+from ..Tools.utilities.streaming_events import emit_tool_call, emit_tool_output
 import inspect
 
 load_dotenv()
@@ -36,12 +37,21 @@ class State(TypedDict):
 class BaseAgent:
     _logger = None
 
-    def __init__(self, agent_name: str, logging: bool = True, shared_memory_order: int = 5, retain_messages_order: int = 30):
-        """Base class for agents with common functionality."""
+    def __init__(self, agent_name: str, logging: bool = True, shared_memory_order: int = 5, retain_messages_order: int = 30, max_tool_output_words: int = 3000):
+        """Base class for agents with common functionality.
+
+        Args:
+            agent_name: Name of the agent
+            logging: Enable logging
+            shared_memory_order: Number of messages to keep in shared memory
+            retain_messages_order: Number of messages to retain across executions
+            max_tool_output_words: Maximum number of words to include from tool output in LLM prompts (default: 3000)
+        """
         self.agent_name = agent_name.lower()
         self.logging = logging
         self.shared_memory_order = shared_memory_order
         self.retain_messages_order = retain_messages_order or 10 # Keep default if 20 not desired
+        self.max_tool_output_words = max_tool_output_words  # Configurable tool output limit
         self.app = None  # StateGraph workflow, to be set by subclasses
         self.graph = None
         # These will be set properly by the inheriting Agent class
@@ -62,6 +72,41 @@ class BaseAgent:
             self.logger = None
 
     # --- Synchronous Helper Methods ---
+
+    def _truncate_tool_output(self, tool_output: str, max_words: Optional[int] = None) -> str:
+        """
+        Truncate tool output to a maximum number of words.
+
+        Args:
+            tool_output: The tool output string to truncate
+            max_words: Maximum number of words (uses self.max_tool_output_words if None)
+
+        Returns:
+            Truncated tool output with truncation notice if truncated
+        """
+        if not tool_output or tool_output == 'N/A':
+            return tool_output
+
+        max_words = max_words or self.max_tool_output_words
+
+        # Convert to string if not already
+        tool_output_str = str(tool_output)
+
+        # Split into words
+        words = tool_output_str.split()
+
+        # Check if truncation is needed
+        if len(words) <= max_words:
+            return tool_output_str
+
+        # Truncate and add notice
+        truncated = ' '.join(words[:max_words])
+        truncation_notice = f"\n\n[... OUTPUT TRUNCATED: Showing first {max_words} words out of {len(words)} total words. Full output stored in state ...]"
+
+        if self.logger:
+            self.logger.info(f"Tool output truncated from {len(words)} words to {max_words} words for LLM prompt")
+
+        return truncated + truncation_notice
 
     async def gettoolinput(self, tool_input: Union[Dict, str], tool_name: str) -> Union[Dict, str]:
         """Parse and sanitize tool input based on the tool's schema."""
@@ -242,7 +287,10 @@ class BaseAgent:
         Execute a tool based on the current state asynchronously,
         differentiating between async and sync based on the underlying tool func
         and trusting ainvoke if func inspection fails but ainvoke exists.
+
+        Emits streaming events for tool calls and outputs if streaming callback is set.
         """
+        # Import streaming utilities
         tool_name = state.get("current_tool")
         tool_input = state.get("tool_input")
 
@@ -279,6 +327,9 @@ class BaseAgent:
         tool = self.tool_mapping[tool_name]
         if self.logger:
             self.logger.warning(f"Attempting to execute tool: {tool_name} with input: {tool_input}")
+
+        # Emit tool call event
+        await emit_tool_call(tool_name, tool_input, node=state.get('current_node'))
 
         result = None
         try:
@@ -360,73 +411,119 @@ class BaseAgent:
             result = f"Validation Error for tool '{tool_name}': {str(e)}. Input: {tool_input}. Ensure format matches requirements."
             if self.logger: self.logger.warning(f"Validation error executing tool '{tool_name}': {e}. Input: {tool_input}")
             state['satisfied'] = False
+            state['tool_output'] = result
+            state['current_tool'] = None  # Clear invalid tool to prevent infinite loop
+            if "messages" not in state: state["messages"] = []
+            state["messages"].append({"role": "tool", "name": tool_name, "content": state['tool_output']})
+
+            # Manual state update for early return
+            state['previous_node'] = 'execute_tool'
+            state['current_node'] = None
+            return state
         except Exception as e:
             # Catch the specific error if needed for debugging, otherwise general Exception
             result = f"Error executing tool '{tool_name}': {str(e)}. Input: {tool_input}"
             if self.logger:
                 self.logger.error(f"Unexpected error executing tool '{tool_name}': {e}", exc_info=True)
             state['satisfied'] = False
+            state['tool_output'] = result
+            state['current_tool'] = None  # Clear invalid tool to prevent infinite loop
+            if "messages" not in state: state["messages"] = []
+            state["messages"].append({"role": "tool", "name": tool_name, "content": state['tool_output']})
 
+            # Manual state update for early return
+            state['previous_node'] = 'execute_tool'
+            state['current_node'] = None
+            return state
 
-        # ... (no changes needed in state update/return logic) ...
-        if "messages" not in state: state["messages"] = []
-        if self.logger:
-            self.logger.warning("-------------------------------------Tool Output---------------------------------")
-            log_output = str(result)
-            # if len(log_output) > 500: log_output = log_output[:500] + "... (truncated)"
-            self.logger.warning(f"Tool: {tool_name}, Output: {log_output}")
-            self.logger.warning("-----------------------------------------------------------------------------------")
-
-        # Check for return_direct in three places (priority order):
-        # 1. Tool decorator's return_direct attribute (lowest priority)
-        # 2. Dynamic return_direct from tool input parameter (medium priority)
-        # 3. Return value from tool execution (highest priority)
-
-        tool_decorator_return_direct = hasattr(tool, 'return_direct') and tool.return_direct
-        input_return_direct = False
-        result_return_direct = False
-        actual_result = result
-
-        # Check if tool_input contains return_direct parameter
-        if isinstance(tool_input, dict) and 'return_direct' in tool_input:
-            input_return_direct = tool_input.get('return_direct', False)
+        # Post-processing: Handle result and return_direct logic
+        # Wrap in try-except to catch any errors during result processing
+        try:
+            if "messages" not in state: state["messages"] = []
             if self.logger:
-                self.logger.info(f"Tool '{tool_name}' has return_direct={input_return_direct} from tool_input")
+                self.logger.warning("-------------------------------------Tool Output---------------------------------")
+                log_output = str(result)
+                # if len(log_output) > 500: log_output = log_output[:500] + "... (truncated)"
+                self.logger.warning(f"Tool: {tool_name}, Output: {log_output}")
+                self.logger.warning("-----------------------------------------------------------------------------------")
 
-        # Check if result is a dict with return_direct key (tool decided internally)
-        if isinstance(result, dict) and 'return_direct' in result:
-            result_return_direct = result.get('return_direct', False)
-            # Extract actual result (remove return_direct from output)
-            actual_result = {k: v for k, v in result.items() if k != 'return_direct'}
+            # Check for return_direct in three places with proper priority:
+            # Priority: Return Value > Argument > Decorator
+            # 1. Return value from tool execution (HIGHEST priority)
+            # 2. Dynamic return_direct from tool input argument (MEDIUM priority)
+            # 3. Tool decorator's return_direct attribute (LOWEST priority)
+
+            tool_decorator_return_direct = hasattr(tool, 'return_direct') and tool.return_direct
+            input_return_direct = None  # None means not provided
+            result_return_direct = None  # None means not provided
+            actual_result = result
+
+            # Check if tool_input contains return_direct argument
+            if isinstance(tool_input, dict) and 'return_direct' in tool_input:
+                input_return_direct = tool_input.get('return_direct')
+                if self.logger:
+                    self.logger.info(f"Tool '{tool_name}' has return_direct={input_return_direct} from tool_input argument")
+
+            # Check if result is a dict with return_direct key (tool decided internally during execution)
+            if isinstance(result, dict) and 'return_direct' in result:
+                result_return_direct = result.get('return_direct')
+                # Extract actual result (remove return_direct from output)
+                actual_result = {k: v for k, v in result.items() if k != 'return_direct'}
+                if self.logger:
+                    self.logger.info(f"Tool '{tool_name}' returned return_direct={result_return_direct} in result (runtime decision)")
+
+            # Implement proper priority: Return Value > Argument > Decorator
+            should_return_direct = False
+            source = None
+
+            if result_return_direct is not None:
+                # HIGHEST PRIORITY: Return value from function execution
+                should_return_direct = bool(result_return_direct)
+                source = "return value (runtime decision)"
+            elif input_return_direct is not None:
+                # MEDIUM PRIORITY: Argument passed to function
+                should_return_direct = bool(input_return_direct)
+                source = "input argument"
+            else:
+                # LOWEST PRIORITY: Decorator
+                should_return_direct = tool_decorator_return_direct
+                source = "decorator"
+
+            # Store the actual result (without return_direct metadata)
+            state['tool_output'] = str(actual_result)
+            state['passed_from'] = tool_name
+            state["messages"].append({"role": tool_name, "content": state['tool_output']})
+
+            # Emit tool output event
+            await emit_tool_output(tool_name, actual_result, node=state.get('current_node'))
+
+            if should_return_direct:
+                 if self.logger:
+                     self.logger.warning(f"Tool '{tool_name}' requested return_direct ({source}). Setting final answer.")
+                 state.update({
+                     'current_tool': None, 'tool_input': None, 'answer': state['tool_output'],
+                     'reasoning': f"Result directly provided by tool '{tool_name}'.",
+                     'satisfied': True, 'delegate_to_agent': None,
+                 })
+            elif 'satisfied' not in state:
+                 state['satisfied'] = False
+
+        except Exception as e:
+            # Catch any errors during result processing (e.g., str() conversion, dict operations, message append)
+            error_msg = f"Error processing tool result for '{tool_name}': {str(e)}. Raw result type: {type(result).__name__}"
             if self.logger:
-                self.logger.info(f"Tool '{tool_name}' returned return_direct={result_return_direct} in result")
+                self.logger.error(f"Error during tool result processing for '{tool_name}': {e}", exc_info=True)
 
-        # Priority: result > input > decorator
-        should_return_direct = result_return_direct or input_return_direct or tool_decorator_return_direct
-
-        # Determine source for logging
-        if result_return_direct:
-            source = "return value"
-        elif input_return_direct:
-            source = "input parameter"
-        else:
-            source = "decorator"
-
-        # Store the actual result (without return_direct metadata)
-        state['tool_output'] = str(actual_result)
-        state['passed_from'] = tool_name
-        state["messages"].append({"role": tool_name, "content": state['tool_output']})
-
-        if should_return_direct:
-             if self.logger:
-                 self.logger.warning(f"Tool '{tool_name}' requested return_direct ({source}). Setting final answer.")
-             state.update({
-                 'current_tool': None, 'tool_input': None, 'answer': state['tool_output'],
-                 'reasoning': f"Result directly provided by tool '{tool_name}'.",
-                 'satisfied': True, 'delegate_to_agent': None,
-             })
-        elif 'satisfied' not in state:
-             state['satisfied'] = False
+            state['satisfied'] = False
+            state['tool_output'] = error_msg
+            state['current_tool'] = None
+            if "messages" not in state: state["messages"] = []
+            # Use try-except for message append in case state["messages"] is corrupted
+            try:
+                state["messages"].append({"role": "tool", "name": tool_name, "content": error_msg})
+            except Exception:
+                # If even this fails, create new messages list
+                state["messages"] = [{"role": "tool", "name": tool_name, "content": error_msg}]
 
         # Manual state update to be consistent with other nodes (don't use _update_state as it expects LLM response)
         state['previous_node'] = 'execute_tool'

@@ -1,4 +1,5 @@
 import os
+import warnings
 from langchain_community.llms.huggingface_endpoint import HuggingFaceEndpoint
 from langchain_community.chat_models.huggingface import ChatHuggingFace
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
@@ -9,11 +10,22 @@ from langchain_groq.chat_models import ChatGroq
 from pydantic import BaseModel
 from typing import Dict, List, Literal, Type, AsyncGenerator, Union
 from typing import Optional
-from langchain_core.prompts import ChatPromptTemplate
+from ...prompts import ChatPromptTemplate
 from datetime import datetime, timezone
 from ...prompts.Template.template import PromptTemplate
 from ...Tools.logging_setup.logger import setup_logger
 import logging
+
+# Suppress LangChain parameter validation warnings for reasoning models
+# These are false positives when using reasoning_effort as a direct parameter (which is correct)
+# The warning appears because LangChain's internal validation checks parameter passing,
+# but our implementation already passes reasoning_effort correctly as a direct parameter
+warnings.filterwarnings(
+    'ignore',
+    message="Parameters .* should be specified explicitly",
+    category=UserWarning,
+    module='langchain_openai'
+)
 
 # Use shared logger instead of separate instance
 logger = setup_logger()
@@ -131,13 +143,19 @@ class BaseGenerativeModel:
                         else:
                             reasoning_effort = "high"
 
-                        # Note: reasoning_effort should be passed via model_kwargs
-                        # Some models may not support this parameter yet
+                        # IMPORTANT: reasoning_effort must be passed as a direct parameter, NOT in model_kwargs
+                        # This is required by LangChain's ChatOpenAI for reasoning models
+                        # Supported values: 'low', 'medium', 'high' (some models also support 'minimal')
                         llm = ChatOpenAI(
                             model=self.model_name,
-                            model_kwargs={"reasoning_effort": reasoning_effort},
-                            api_key=os.environ.get('OPENAI_API_KEY')
+                            reasoning_effort=reasoning_effort,  # Direct parameter (not in model_kwargs)
+                            api_key=os.environ.get('OPENAI_API_KEY'),
+                            verbose=True  # Enable verbose logging to see API calls
                         )
+
+                        # Log the reasoning effort being used
+                        if self.logger:
+                            self.logger.info(f"✅ Reasoning model '{self.model_name}' initialized with reasoning_effort='{reasoning_effort}' (mapped from temperature={self.temperature})")
                     else:
                         # GPT-4o and earlier models support temperature
                         llm = ChatOpenAI(
