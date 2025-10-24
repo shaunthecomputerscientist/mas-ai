@@ -221,11 +221,12 @@ class MultiAgentSystem:
                         input=agent_output['answer'],
                         reasoning=agent_output['reasoning']
                     )
-        while agent_output['delegate_to_agent']:
+        # Check if delegation is needed (not None and not "none" string)
+        while agent_output['delegate_to_agent'] and agent_output['delegate_to_agent'].lower() != 'none':
             try:
                 next_agent: Agent = self.agentManager.agents[agent_output['delegate_to_agent'].lower()]
             except Exception as e:
-                raise ValueError(e)
+                raise ValueError(f"Agent '{agent_output['delegate_to_agent']}' not found. Available agents: {list(self.agentManager.agents.keys())}")
             agent_prompt = (
                         f"TASK IS DELEGATED TO YOU BY {self.state['last_agent']}\n\n"
                         f"<REASONING OF {self.state['last_agent']} AGENT>: {self.state['agent_reasoning']}\n\n"
@@ -297,12 +298,12 @@ class MultiAgentSystem:
                 reasoning=agent_output.get('reasoning', '')
             )
 
-        # Continue delegation chain with streaming
-        while agent_output and agent_output.get('delegate_to_agent'):
+        # Continue delegation chain with streaming (check for not None and not "none" string)
+        while agent_output and agent_output.get('delegate_to_agent') and agent_output.get('delegate_to_agent').lower() != 'none':
             try:
                 next_agent: Agent = self.agentManager.agents[agent_output['delegate_to_agent'].lower()]
-            except Exception as e:
-                raise ValueError(f"Agent '{agent_output.get('delegate_to_agent')}' not found: {e}")
+            except Exception:
+                raise ValueError(f"Agent '{agent_output.get('delegate_to_agent')}' not found. Available agents: {list(self.agentManager.agents.keys())}")
 
             # Build delegation prompt
             agent_prompt = (

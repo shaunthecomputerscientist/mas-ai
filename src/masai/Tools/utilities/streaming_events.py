@@ -106,7 +106,8 @@ class StreamingEvent:
         elif self.event_type == "answer":
             choice_data = {
                 "delta": {
-                    "content": self.data.get("answer", "")
+                    "content": self.data.get("answer", ""),
+                    "satisfied": self.data.get("satisfied", True)  # Include satisfied status
                 },
                 "finish_reason": None
             }

@@ -24,7 +24,7 @@ while getopts "re:v:" flag; do
             ;;
         *)
             echo "Usage: $0 [-r] -e <execution_type> [-v <venv_name>]"
-            echo "  -r: Install dependencies from requirements.txt"
+            echo "  -r: Install dependencies from masai_requirements.txt"
             echo "  -e: Specify execution type (hierarchical, decentralized, sequential)"
             echo "  -v: Specify virtual environment name (default: masai)"
             exit 1
@@ -104,10 +104,10 @@ fi
 
 # Install requirements if flag is set
 if [ "$INSTALL_REQS" = true ]; then
-    if [ -f "requirements.txt" ]; then
-        echo "Installing dependencies from requirements.txt..."
+    if [ -f "masai_requirements.txt" ]; then
+        echo "Installing dependencies from masai_requirements.txt..."
         pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install -r masai_requirements.txt
         if [ $? -eq 0 ]; then
             echo "Dependencies installed successfully"
         else
@@ -116,10 +116,10 @@ if [ "$INSTALL_REQS" = true ]; then
             exit 1
         fi
     else
-        echo "requirements.txt not found, skipping installation"
+        echo "masai_requirements.txt not found, skipping installation"
     fi
 else
-    echo "Skipping installation of requirements.txt (use -r flag to install)"
+    echo "Skipping installation of masai_requirements.txt (use -r flag to install)"
 fi
 
 # Run masai.py with the specified execution type

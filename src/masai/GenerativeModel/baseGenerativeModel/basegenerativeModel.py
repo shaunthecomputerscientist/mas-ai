@@ -1,12 +1,27 @@
 import os
 import warnings
-from langchain_community.llms.huggingface_endpoint import HuggingFaceEndpoint
-from langchain_community.chat_models.huggingface import ChatHuggingFace
-from langchain_google_genai.chat_models import ChatGoogleGenerativeAI
-from langchain_community.chat_models.ollama import ChatOllama
-from langchain_community.chat_models.anthropic import ChatAnthropic
-from langchain_openai.chat_models import ChatOpenAI
-from langchain_groq.chat_models import ChatGroq
+# MASAI Vanilla SDK Wrappers - Drop-in replacements for LangChain
+from ..vanilla_wrappers import ChatOpenAI, ChatGoogleGenerativeAI
+
+# Import parameter configuration and mapping functions
+from ..parameter_config import (
+    extract_gemini_params,
+    extract_openai_params,
+    validate_parameters,
+    SHARED_PARAMS,
+    MAPPED_PARAMS,
+    GEMINI_ONLY_PARAMS,
+    OPENAI_ONLY_PARAMS
+)
+
+# COMMENTED OUT - Not using these for now, can extend later
+# from langchain_community.llms.huggingface_endpoint import HuggingFaceEndpoint
+# from langchain_community.chat_models.huggingface import ChatHuggingFace
+# from langchain_community.chat_models.ollama import ChatOllama
+# from langchain_community.chat_models.anthropic import ChatAnthropic
+# from langchain_openai.chat_models import ChatOpenAI  # Replaced with vanilla wrapper
+# from langchain_google_genai.chat_models import ChatGoogleGenerativeAI  # Replaced with vanilla wrapper
+# from langchain_groq.chat_models import ChatGroq
 from pydantic import BaseModel
 from typing import Dict, List, Literal, Type, AsyncGenerator, Union
 from typing import Optional
@@ -43,13 +58,14 @@ class BaseGenerativeModel:
         info: Optional[dict] = None,
         system_prompt: Optional[str]= None,
         input_variables: Optional[List[str]] = None,
-        logging: Optional[bool] = False
+        logging: Optional[bool] = False,
+        **kwargs: Optional[dict]
     ):
         """Initialize the BaseGenerativeModel.
 
         Args:
             model_name (str): Name of the model to use.
-            category (str): Category of the model to use one of the following: gemini, huggingface, openai, anthropic, ollama, groq
+            category (str): Category of the model to use one of the following: gemini, openai
             temperature (float): Temperature for the model
             memory (bool, optional): Whether to use memory. Defaults to True.
             memory_order (int, optional): Number of messages to keep in memory. Defaults to 5.
@@ -57,17 +73,14 @@ class BaseGenerativeModel:
             info (Optional[dict], optional): Information to the model. Defaults to None.
             system_prompt(Optional[str]): Bypass Chatprompt Template by simply providing a system prompt. Useful when using astream_response for simple usecases where defining complicated chatpromptemplate is not necessary.
             input_variables (Optional[List[str]], optional): Input variables for the prompt template. Defaults to None.
-        
+            logging (Optional[bool], optional): Whether to log the responses. Defaults to False.
+            **kwargs: Additional arguments for the model.
+
         Add api keys to the environment variables as follows for the categories we support:
         OPENAI_API_KEY
-        HUGGINGFACEHUB_API_TOKEN
         GOOGLE_API_KEY
-        ANTHROPIC_API_KEY
-        OLLAMA_BASE_URL
-        GROQ_API_KEY
-        Only for ollama, you need to install ollama and run it locally.
-        Set OLLAMA_BASE_URI in env variable.
-        Provide api keys only for selected categories.
+
+        Note: Support for Anthropic, Groq, HuggingFace, and Ollama is commented out but can be extended later.
         """
         self.model_name = model_name
         self.temperature = temperature
@@ -80,131 +93,163 @@ class BaseGenerativeModel:
         if logging:
             self.logger = logger
         else: self.logger = None
+        # Set verbose before initializing LLM (needed in _get_llm)
+        self.verbose = kwargs.get('verbose', False) if kwargs else False
+        # Store kwargs for passing to wrapper classes
+        self.kwargs = kwargs
         # Initialize the LLM
         self.model = self._get_llm()
-        
+
         if system_prompt:
             self.prompt = self.prompt_formatter(system_prompt=system_prompt, input_variables=input_variables)
 
     def _get_llm(self):
+            """
+            Initialize the LLM with proper parameter filtering and mapping.
+
+            This method:
+            1. Validates parameters for the selected provider
+            2. Extracts and maps parameters using standardized names
+            3. Filters out incompatible parameters (prevents OpenAI 400 errors)
+            4. Auto-configures reasoning/thinking parameters if not explicitly set
+
+            Returns:
+                Initialized LLM instance (ChatOpenAI or ChatGoogleGenerativeAI)
+            """
             try:
+                # Validate parameters and warn about potential issues
+                if self.kwargs:
+                    validate_parameters(self.kwargs, self.category)
+
                 if "gemini" in self.category:
-                    # Gemini 2.5 models have built-in thinking capability
-                    # Check if this is a thinking-capable model
-                    is_thinking_model = (
-                        self.model_name.startswith('gemini-2.5') or
-                        'thinking' in self.model_name.lower()         # Experimental thinking models
-                    )
+                    # Extract and map parameters for Gemini
+                    # This automatically:
+                    # - Adds shared parameters (temperature, top_p, etc.)
+                    # - Maps standardized names to Gemini names (e.g., stop_sequences → stop_sequences)
+                    # - Adds Gemini-specific parameters (removes gemini_ prefix)
+                    # - Filters out OpenAI-only parameters
+                    extracted_params = extract_gemini_params(self.kwargs or {}, verbose=self.verbose)
 
-                    model_kwargs = {}
-                    if is_thinking_model:
-                        # Map temperature to thinking budget for reasoning models
-                        # Low temp = focused thinking, high temp = exploratory thinking
-                        if self.temperature <= 0.3:
-                            model_kwargs["thinkingBudget"] = "low"
-                        elif self.temperature <= 0.7:
-                            model_kwargs["thinkingBudget"] = "medium"
-                        else:
-                            model_kwargs["thinkingBudget"] = "high"
+                    # Build final parameters for Gemini
+                    gemini_params = {
+                        "model": self.model_name,
+                        "temperature": self.temperature,
+                        "api_key": os.environ.get('GOOGLE_API_KEY'),
+                        "verbose": self.verbose,
+                        **extracted_params  # Add all extracted parameters
+                    }
 
-                    llm = ChatGoogleGenerativeAI(
-                        api_key=os.environ.get('GOOGLE_API_KEY'),
-                        verbose=True,
-                        model=self.model_name,
-                        temperature=self.temperature,
-                        model_kwargs=model_kwargs if model_kwargs else None
-                    )
-                elif "huggingface" in self.category:
-                    llm = ChatHuggingFace(
-                        llm=HuggingFaceEndpoint(repo_id=self.model_name,
-                        huggingfacehub_api_token=os.environ.get('HUGGINGFACEHUB_API_TOKEN'),
-                        temperature=self.temperature),
+                    # Auto-map temperature to thinking_budget if not explicitly set
+                    # Only for thinking models (Gemini 2.5 series)
+                    if 'thinking_budget' not in gemini_params and 'gemini_thinking_budget' not in (self.kwargs or {}):
+                        is_thinking_model = (
+                            self.model_name.startswith('gemini-2.5') or
+                            'thinking' in self.model_name.lower()
+                        )
+                        if is_thinking_model:
+                            # Use dynamic thinking budget (-1) for all temperatures
+                            # This lets Gemini decide the optimal thinking budget
+                            gemini_params['thinking_budget'] = -1
+                            if self.verbose and self.logger:
+                                self.logger.info(f"✅ Thinking model '{self.model_name}' initialized with thinking_budget=-1 (dynamic)")
 
+                    llm = ChatGoogleGenerativeAI(**gemini_params)
 
-                    )
                 elif "openai" in self.category:
-                    # Reasoning models don't support temperature parameter
-                    # Check if this is a reasoning model (GPT-5, o-series, GPT-4.1)
-                    is_reasoning_model = (
-                        self.model_name.startswith('gpt-5') or      # GPT-5 series
-                        self.model_name.startswith('o1') or         # o1, o1-mini, o1-preview
-                        self.model_name.startswith('o3') or         # o3, o3-mini
-                        self.model_name.startswith('o4') or         # o4-mini
-                        self.model_name.startswith('gpt-4.1')       # GPT-4.1, gpt-4.1-nano
-                    )
+                    # Extract and map parameters for OpenAI
+                    # This automatically:
+                    # - Adds shared parameters (temperature, top_p, etc.)
+                    # - Maps standardized names to OpenAI names (e.g., max_output_tokens → max_tokens)
+                    # - Adds OpenAI-specific parameters (removes openai_ prefix)
+                    # - FILTERS OUT Gemini-only parameters (CRITICAL: prevents 400 errors)
+                    extracted_params = extract_openai_params(self.kwargs or {}, verbose=self.verbose)
 
-                    if is_reasoning_model:
-                        # Reasoning models use reasoning_effort instead of temperature
-                        # Map temperature to reasoning_effort: 0-0.3=low, 0.4-0.7=medium, 0.8+=high
-                        if self.temperature <= 0.3:
-                            reasoning_effort = "low"
-                        elif self.temperature <= 0.7:
-                            reasoning_effort = "medium"
-                        else:
-                            reasoning_effort = "high"
+                    # Build final parameters for OpenAI
+                    openai_params = {
+                        "model": self.model_name,
+                        "temperature": self.temperature,
+                        "api_key": os.environ.get('OPENAI_API_KEY'),
+                        "verbose": self.verbose,
+                        **extracted_params  # Add all extracted parameters
+                    }
 
-                        # IMPORTANT: reasoning_effort must be passed as a direct parameter, NOT in model_kwargs
-                        # This is required by LangChain's ChatOpenAI for reasoning models
-                        # Supported values: 'low', 'medium', 'high' (some models also support 'minimal')
-                        llm = ChatOpenAI(
-                            model=self.model_name,
-                            reasoning_effort=reasoning_effort,  # Direct parameter (not in model_kwargs)
-                            api_key=os.environ.get('OPENAI_API_KEY'),
-                            verbose=True  # Enable verbose logging to see API calls
+                    # Auto-map temperature to reasoning_effort if not explicitly set
+                    # Only for reasoning models (GPT-5, o-series, GPT-4.1)
+                    if 'reasoning_effort' not in openai_params and 'openai_reasoning_effort' not in (self.kwargs or {}):
+                        is_reasoning_model = (
+                            self.model_name.startswith('gpt-5') or
+                            self.model_name.startswith('o1') or
+                            self.model_name.startswith('o3') or
+                            self.model_name.startswith('o4') or
+                            self.model_name.startswith('gpt-4.1')
                         )
+                        if is_reasoning_model:
+                            # Map temperature to reasoning_effort
+                            if self.temperature <= 0.3:
+                                openai_params['reasoning_effort'] = "low"
+                            elif self.temperature <= 0.7:
+                                openai_params['reasoning_effort'] = "medium"
+                            else:
+                                openai_params['reasoning_effort'] = "high"
 
-                        # Log the reasoning effort being used
-                        if self.logger:
-                            self.logger.info(f"✅ Reasoning model '{self.model_name}' initialized with reasoning_effort='{reasoning_effort}' (mapped from temperature={self.temperature})")
-                    else:
-                        # GPT-4o and earlier models support temperature
-                        llm = ChatOpenAI(
-                            model=self.model_name,
-                            temperature=self.temperature,
-                            api_key=os.environ.get('OPENAI_API_KEY')
-                        )
-                elif "antrophic" in self.category or "anthropic" in self.category:
-                    # Check if this is a thinking/reasoning model
-                    is_thinking_model = (
-                        self.model_name.startswith('claude-4') or
-                        self.model_name.startswith('claude-3.7')
-                    )
+                            # Log the reasoning effort being used
+                            if self.verbose and self.logger:
+                                self.logger.info(f"✅ Reasoning model '{self.model_name}' initialized with reasoning_effort='{openai_params['reasoning_effort']}' (mapped from temperature={self.temperature})")
 
-                    model_kwargs = {}
-                    if is_thinking_model:
-                        # Enable extended thinking for Claude 4 and 3.7 models
-                        # Map temperature to thinking budget tokens
-                        if self.temperature <= 0.3:
-                            budget_tokens = 5000  # Focused thinking
-                        elif self.temperature <= 0.7:
-                            budget_tokens = 10000  # Balanced thinking
-                        else:
-                            budget_tokens = 20000  # Deep thinking
+                    llm = ChatOpenAI(**openai_params)
 
-                        model_kwargs["thinking"] = {
-                            "type": "enabled",
-                            "budget_tokens": budget_tokens
-                        }
+                # COMMENTED OUT - Not using HuggingFace for now
+                # elif "huggingface" in self.category:
+                #     llm = ChatHuggingFace(
+                #         llm=HuggingFaceEndpoint(repo_id=self.model_name,
+                #         huggingfacehub_api_token=os.environ.get('HUGGINGFACEHUB_API_TOKEN'),
+                #         temperature=self.temperature),
+                #     )
+                # COMMENTED OUT - Not using Anthropic for now
+                # elif "antrophic" in self.category or "anthropic" in self.category:
+                #     # Check if this is a thinking/reasoning model
+                #     is_thinking_model = (
+                #         self.model_name.startswith('claude-4') or
+                #         self.model_name.startswith('claude-3.7')
+                #     )
 
-                    llm = ChatAnthropic(
-                        model_name=self.model_name,
-                        temperature=self.temperature,
-                        anthropic_api_key=os.environ.get('ANTHROPIC_API_KEY'),
-                        model_kwargs=model_kwargs if model_kwargs else None
-                    )
-                elif "ollama" in self.category:
-                    llm = ChatOllama(
-                        model=self.model_name,
-                        temperature=self.temperature,
-                        base_url=os.environ.get(
-                            'OLLAMA_BASE_URL', 
-                            'http://localhost:11434'  # Default local URL
-                        ),
-                    )
-                elif "groq" in self.category:
-                    llm = ChatGroq(model_name=self.model_name,
-                                temperature=self.temperature,
-                                api_key=os.environ.get('GROQ_API_KEY'))
+                #     model_kwargs = {}
+                #     if is_thinking_model:
+                #         # Enable extended thinking for Claude 4 and 3.7 models
+                #         # Map temperature to thinking budget tokens
+                #         if self.temperature <= 0.3:
+                #             budget_tokens = 5000  # Focused thinking
+                #         elif self.temperature <= 0.7:
+                #             budget_tokens = 10000  # Balanced thinking
+                #         else:
+                #             budget_tokens = 20000  # Deep thinking
+
+                #         model_kwargs["thinking"] = {
+                #             "type": "enabled",
+                #             "budget_tokens": budget_tokens
+                #         }
+
+                #     llm = ChatAnthropic(
+                #         model_name=self.model_name,
+                #         temperature=self.temperature,
+                #         anthropic_api_key=os.environ.get('ANTHROPIC_API_KEY'),
+                #         model_kwargs=model_kwargs if model_kwargs else None
+                #     )
+                # COMMENTED OUT - Not using Ollama for now
+                # elif "ollama" in self.category:
+                #     llm = ChatOllama(
+                #         model=self.model_name,
+                #         temperature=self.temperature,
+                #         base_url=os.environ.get(
+                #             'OLLAMA_BASE_URL',
+                #             'http://localhost:11434'  # Default local URL
+                #         ),
+                #     )
+                # COMMENTED OUT - Not using Groq for now
+                # elif "groq" in self.category:
+                #     llm = ChatGroq(model_name=self.model_name,
+                #                 temperature=self.temperature,
+                #                 api_key=os.environ.get('GROQ_API_KEY'))
 
                 else:
                     raise ValueError(f"Unsupported category: {self.category}")

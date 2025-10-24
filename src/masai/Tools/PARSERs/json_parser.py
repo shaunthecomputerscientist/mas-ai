@@ -472,19 +472,24 @@ def parser(stream):
 
 def parse_tool_input(tool_input:dict, fields):
     """
-    Parses `tool_input` according to the provided fields, handling various formats and edge cases.
+    Parses tool_input according to the provided fields, handling various formats and edge cases.
 
     Parameters:
-    tool_input (str or dict): The input to parse. It can be a dictionary, a JSON-like string, or a raw string.
+    tool_input (str or dict): The input to parse. Can be a dictionary, JSON string, or malformed JSON.
     fields (list): List of field names to extract.
 
     Returns:
     dict: A dictionary containing the parsed data for the specified fields.
 
     Flow:
-    1. If tool_input is already a dict → Direct field extraction (fast path)
-    2. If tool_input is a string → Try to parse as JSON first, then fall back to regex
+    1. If tool_input is a dict → Direct field extraction (fast path)
+    2. If tool_input is a string → Try json.loads(), then repair, then manual extraction
+    3. Extract fields using regex-based parsing for malformed JSON
     """
+
+    # Fields that may contain code or structured content with escape sequences
+    # These are preserved during manual extraction but json.loads() will still unescape them
+    CODE_FIELDS = {'code', 'script', 'program', 'source', 'query_code', 'python_code'}
 
     def clean_text(text):
         """Cleans and normalizes the input text."""
@@ -705,13 +710,15 @@ def parse_tool_input(tool_input:dict, fields):
                             # This is the real closing quote!
                             value = ''.join(value_chars)
 
-                            # CRITICAL: Unescape JSON escape sequences
-                            # When we manually extract strings, we get the raw escaped form.
-                            # We need to unescape it to match what json.loads() would return.
-                            # Example: "x = 1\\ny = 2" → "x = 1\ny = 2"
-                            value = unescape_json_string(value)
+                            # CRITICAL: Unescape JSON escape sequences ONLY for non-code fields
+                            # Unescape JSON escape sequences for non-code fields
+                            # Code fields preserve escape sequences in their original form
+                            if field not in CODE_FIELDS:
+                                value = unescape_json_string(value)
+                                logger.debug(f"Extracted field '{field}' value (length: {len(value)}, verified closing quote, unescaped)")
+                            else:
+                                logger.debug(f"Extracted field '{field}' value (length: {len(value)}, verified closing quote, preserved as-is)")
 
-                            logger.debug(f"Extracted field '{field}' value (length: {len(value)}, verified closing quote, unescaped)")
                             return value
                         else:
                             # Unescaped quote inside value - include it
@@ -732,10 +739,14 @@ def parse_tool_input(tool_input:dict, fields):
             # Reached end without finding closing quote
             value = ''.join(value_chars)
 
-            # CRITICAL: Unescape JSON escape sequences even if no closing quote found
-            value = unescape_json_string(value)
+            # Unescape JSON escape sequences for non-code fields
+            # Code fields preserve escape sequences in their original form
+            if field not in CODE_FIELDS:
+                value = unescape_json_string(value)
+                logger.warning(f"No closing quote found for field '{field}', returning value (length: {len(value)}, unescaped)")
+            else:
+                logger.warning(f"No closing quote found for field '{field}', returning value (length: {len(value)}, preserved as-is)")
 
-            logger.warning(f"No closing quote found for field '{field}', returning value (length: {len(value)}, unescaped)")
             return value
 
         # TYPE 5: Objects {} - extract with bracket counting
@@ -846,7 +857,9 @@ def parse_tool_input(tool_input:dict, fields):
         return result
 
     # OPTIMIZATION: If tool_input is a string, try to parse it as JSON first
-    # This converts it to a dict, which uses the fast path in extract_field_value
+    # This converts it to a dict for faster field extraction
+    # NOTE: json.loads() automatically unescapes ALL string fields (standard JSON behavior)
+    # Tools that need escape sequences preserved should handle this in their own processing
     if isinstance(tool_input, str):
         try:
             # Try direct JSON parsing
@@ -858,7 +871,7 @@ def parse_tool_input(tool_input:dict, fields):
                 repaired = repair_json_string(tool_input)
                 tool_input = json.loads(repaired)
                 logger.debug("Successfully parsed repaired tool_input string as JSON")
-            except json.JSONDecodeError as repair_error:
+            except json.JSONDecodeError:
                 # Try one more time with aggressive cleaning
                 try:
                     # Remove any leading/trailing whitespace and quotes

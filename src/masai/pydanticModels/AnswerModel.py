@@ -5,25 +5,27 @@ from pydantic import BaseModel, Field
 def answermodel(tool_names: List[str], tools) -> Type[BaseModel]:
         """Define the AnswerFormat model dynamically based on tools."""
         class AnswerFormat(BaseModel):
-            answer: Optional[Union[str,List[str],Dict]] = Field(None, description="Write final generated answer/response when finished the task.")
-            satisfied: bool = Field(..., description="Set to True to return final answer and (tool,tool_input=None). Set to False for further work on task (reflection, tool usage, etc).")
+
+            reasoning: str = Field(..., description="LOGICAL REASONING AND CONTEXT AANLYSIS THAT JUSTIFIES YOUR ANSWER.")
+            answer: Optional[str] = Field(None, description="GENERATE FINAL ANSWER IN THIS FIELD.")
+            satisfied: bool = Field(..., description="SET TO: True to return final answer and (tool,tool_input=None). SET TO: False for further work on task (reflection, tool usage, etc).")
             tool: Optional[str] = Field(
                 None,
-                description=f"""Select tools among: {[(tool.name, tool.args_schema.model_json_schema()['description']) for tool in tools]}.
-                            To use tool, set satisfied=False and specify the tool name, tool_input.
-                            To return answer field, set satisfied=True and tool,tool_input=None. 
-                            On returning answer, you can not work on current problem anymore."""
+                description=f"""SELECT TOOLS FROM: {[(tool.name, tool.args_schema.model_json_schema()['description']) for tool in tools]}.
+                            \n\nTo use tool, set satisfied=False and specify the tool name, tool_input.
+                            TO RETURN answer field, set satisfied=True and tool,tool_input=None.
+                            ON RETURNING answer, YOUR RESPONSE GOES TO USER."""
             )
-            tool_input: Optional[Union[Dict, str]] = Field(
+            tool_input: Optional[str] = Field(
                 None,
-                description=f"""Always provide tool input as valid JSON. TOOL INPUT SCHEMA: {[(tool.name, tool.args_schema.model_json_schema()['properties']) for tool in tools]}.
-                            \n\nSet to None if no tool is needed.
-                            If optional parameters are not needed in tool input, for a task, refrain from using them."""
+                description=f"""ALWAYS PROVIDE TOOL INPUT AS VALID JSON string. TOOL INPUT SCHEMA: {[(tool.name, tool.args_schema.model_json_schema()['properties']) for tool in tools]}.
+                            \n\nSET TO: None if no tool is needed.
+                            If optional parameters are NOT NEEDED in tool input, for a task, refrain from using them in tool input."""
             )
-            reasoning: str = Field(..., description="Logical reasoning and context analysis that justifies your answer.")
+
             delegate_to_agent: Optional[str] = Field(
                 None,
-                description="If task delegation is needed, specify one target agent's name. Set satisfied=True and tool and tool_input to None when delegating. Defaults to None."
+                description="If task delegation is needed, specify one target agent's name. SET: satisfied=True and tool and tool_input to None when delegating. Defaults to None."
             )
 
             @staticmethod

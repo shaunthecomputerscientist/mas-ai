@@ -12,7 +12,12 @@ src/masai/Config/__init__.py
 src/masai/Config/config.py
 src/masai/GenerativeModel/__init__.py
 src/masai/GenerativeModel/generativeModels.py
+src/masai/GenerativeModel/parameter_config.py
 src/masai/GenerativeModel/baseGenerativeModel/basegenerativeModel.py
+src/masai/GenerativeModel/vanilla_wrappers/__init__.py
+src/masai/GenerativeModel/vanilla_wrappers/base_chat_model.py
+src/masai/GenerativeModel/vanilla_wrappers/gemini_wrapper.py
+src/masai/GenerativeModel/vanilla_wrappers/openai_wrapper.py
 src/masai/Memory/InMemoryStore.py
 src/masai/MultiAgents/MultiAgent.py
 src/masai/MultiAgents/TaskManager.py
@@ -47,6 +52,7 @@ src/masai_framework.egg-info/SOURCES.txt
 src/masai_framework.egg-info/dependency_links.txt
 src/masai_framework.egg-info/requires.txt
 src/masai_framework.egg-info/top_level.txt
+tests/test_agent_roles.py
 tests/test_context_truncation.py
 tests/test_document_exact_behavior.py
 tests/test_enhanced_streaming.py
@@ -54,10 +60,15 @@ tests/test_exact_difference.py
 tests/test_format_messages_debug.py
 tests/test_inmemorystore_metadata.py
 tests/test_langchain_replacement.py
+tests/test_masai_imports.py
+tests/test_masai_real_scenario_streaming.py
+tests/test_masai_streaming.py
 tests/test_newline_debug.py
 tests/test_prompt_format_comparison.py
 tests/test_reasoning_effort.py
 tests/test_reasoning_effort_simple.py
 tests/test_simple_truncation.py
+tests/test_streaming_enhanced.py
 tests/test_template_content.py
 tests/test_tool_schema_token_usage.py
+tests/test_vanilla_wrappers.py

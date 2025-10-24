@@ -1,8 +1,11 @@
 import numpy as np
 import os
+import warnings
 from typing import List, Optional, Union, Callable
 
 # Optional import for sentence transformers (heavy ML package)
+# NOTE: sentence-transformers, torch, and transformers are NOT included in MASAI core dependencies
+# Users must install them separately if they want to use SentenceTransformer embeddings
 try:
     from sentence_transformers import SentenceTransformer
     SENTENCE_TRANSFORMERS_AVAILABLE = True
@@ -43,10 +46,34 @@ class InMemoryDocStore:
             if isinstance(embedding_model, str):
                 if not SENTENCE_TRANSFORMERS_AVAILABLE:
                     raise ImportError(
-                        "sentence_transformers is not installed. "
-                        "Install it with: pip install sentence-transformers"
+                        "\n\n"
+                        "=" * 80 + "\n"
+                        "ERROR: sentence-transformers is not installed.\n"
+                        "=" * 80 + "\n\n"
+                        "InMemoryDocStore requires sentence-transformers for embedding-based search.\n\n"
+                        "MASAI does not include heavy ML dependencies (sentence-transformers, torch, transformers)\n"
+                        "in its core installation to keep the framework lightweight.\n\n"
+                        "To use InMemoryDocStore with SentenceTransformer embeddings, install:\n"
+                        "  pip install sentence-transformers\n\n"
+                        "This will also install torch and transformers (~2GB+ download).\n\n"
+                        "ALTERNATIVES:\n"
+                        "1. Use a custom embedding function:\n"
+                        "   def my_embedder(texts): return embeddings\n"
+                        "   store = InMemoryDocStore(embedding_model=my_embedder)\n\n"
+                        "2. Use LangChain embeddings (e.g., OpenAI):\n"
+                        "   from langchain.embeddings import OpenAIEmbeddings\n"
+                        "   store = InMemoryDocStore(embedding_model=OpenAIEmbeddings())\n\n"
+                        "3. Use no embeddings (keyword-based search only):\n"
+                        "   store = InMemoryDocStore(embedding_model=None)\n"
+                        "=" * 80 + "\n"
                     )
                 self.embedding_model = SentenceTransformer(embedding_model)
+                warnings.warn(
+                    f"Using SentenceTransformer model '{embedding_model}'. "
+                    "This requires sentence-transformers, torch, and transformers packages. "
+                    "First-time usage will download the model (~100-500MB).",
+                    UserWarning
+                )
             elif callable(embedding_model):
                 self.embedding_model = embedding_model
             elif hasattr(embedding_model, 'embed_documents'):

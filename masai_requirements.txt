@@ -1,0 +1,72 @@
+# MASAI Core Requirements - Production Dependencies
+# Based on comprehensive analysis and testing (2025-10-22)
+# Streamlined for OpenAI and Google Gemini support only
+# LangChain dependencies removed - MASAI uses custom implementations
+
+# ============================================================================
+# AI/ML PROVIDER SDKs (REQUIRED)
+# ============================================================================
+openai>=2.6.0                    # OpenAI SDK (GPT-4o, GPT-5, o1, o3, o4, gpt-4.1)
+google-generativeai==0.8.5       # Google Gemini SDK (version locked for compatibility)
+
+# COMMENTED OUT - Not using these providers for now
+# anthropic>=0.71.0                # Anthropic SDK (Claude models)
+# groq>=0.33.0                     # Groq SDK (fast inference)
+# ollama>=0.6.0                    # Ollama for local models
+# huggingface-hub>=0.35.0          # HuggingFace model hub access
+
+# ============================================================================
+# CORE UTILITIES (REQUIRED)
+# ============================================================================
+pydantic>=2.12.0                 # Data validation and structured output
+python-dotenv>=1.0.0             # Environment variable management
+requests>=2.32.0                 # HTTP requests
+tenacity>=9.1.0                  # Retry logic with exponential backoff
+tiktoken>=0.12.0                 # OpenAI tokenization
+colorama>=0.4.6                  # Terminal colors (Windows compatible)
+json-repair>=0.39.1              # JSON repair for malformed LLM outputs
+aiofiles>=25.1.0                 # Async file operations
+tqdm>=4.67.0                     # Progress bars
+numpy==1.26.4                    # Numerical operations (locked for compatibility)
+pandas>=2.3.3                    # Data manipulation and analysis
+
+# COMMENTED OUT - Not using HuggingFace for now
+# tokenizers>=0.21.0               # HuggingFace tokenizers
+
+# ============================================================================
+# OPTIONAL - HEAVY DEPENDENCIES (COMMENTED OUT)
+# ============================================================================
+# Uncomment these if you need embeddings or HuggingFace models
+# sentence-transformers>=5.1.1     # Embeddings and semantic search (2GB+)
+# torch>=2.9.0                     # PyTorch (dependency of sentence-transformers)
+# transformers>=4.57.1             # HuggingFace transformers (dependency)
+
+# ============================================================================
+# REDIS SUPPORT (REQUIRED)
+# ============================================================================
+redis>=6.4.0                     # Redis caching support
+
+# ============================================================================
+# BASIC UTILITIES (REQUIRED)
+# ============================================================================
+networkx>=3.4.2                  # Graph manipulation for agent workflows
+
+# ============================================================================
+# TOOLS AND UTILITIES (NOT INCLUDED - USER SHOULD INSTALL AS NEEDED)
+# ============================================================================
+# MASAI is a basic building block framework for agents.
+# Tool-specific dependencies should be installed separately by users.
+#
+# Example tool dependencies (install only if you need them):
+# beautifulsoup4>=4.12.0           # HTML parsing
+# PyPDF2>=3.0.0                    # PDF processing
+# duckduckgo-search>=7.0.0         # DuckDuckGo search tool
+# wikipedia>=1.4.0                 # Wikipedia API
+# arxiv>=2.1.0                     # Arxiv API
+# tavily-python>=0.5.0             # Tavily search
+# youtube-transcript-api>=0.6.3    # YouTube transcripts
+# google-api-python-client>=2.159.0 # Google APIs
+# nylas>=6.7.0                     # Nylas API for email, calendar
+# rank-bm25>=0.2.2                 # BM25 ranking algorithm
+# PyMuPDF>=1.25.5                  # PDF processing (fitz)
+

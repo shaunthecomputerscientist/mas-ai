@@ -190,8 +190,8 @@ class AgentManager:
 
         # Initialize LLM models
         model_config = self._load_model_config(agent_name)
-        llm_args = {"temperature": temperature, "memory_order": memory_order, 
-                    "extra_context": self.context, 
+        llm_args = {"temperature": temperature, "memory_order": memory_order,
+                    "extra_context": self.context,
                     "long_context": long_context,
                     "long_context_order":long_context_order,
                     "chat_log":self.chat_log,
@@ -202,28 +202,80 @@ class AgentManager:
         if kwargs.get('in_memory_store'):
             llm_args["memory_store"] = kwargs['in_memory_store']
             llm_args['k'] = kwargs.get('top_k')
-        
-        
-        def override_config(component, llm_args, memory_order, long_context_order,temperature, **kwargs):
-            temp_args=llm_args.copy()
+
+
+        def extract_model_params(component_config):
+            """
+            Extract ALL model-specific parameters from component config.
+
+            This function is intentionally simple and scalable:
+            - Extracts ALL parameters except core ones (model_name, category)
+            - No hardcoded parameter lists
+            - BaseGenerativeModel handles filtering and mapping automatically
+
+            Users should refer to wrapper docstrings for available parameters:
+            - ChatGoogleGenerativeAI: See docstring for Gemini parameters
+            - ChatOpenAI: See docstring for OpenAI parameters
+            """
+            params = {}
+
+            # Core parameters that should NOT be passed as kwargs
+            core_params = {'model_name', 'category'}
+
+            # Extract ALL other parameters from component config
+            for key, value in component_config.items():
+                if key not in core_params:
+                    params[key] = value
+
+            return params
+
+
+        def override_config(component, llm_args, memory_order, long_context_order, temperature, **kwargs):
+            temp_args = llm_args.copy()
+
+            # Extract parameters from model_config.json for this component
+            component_params = extract_model_params(model_config[component])
+            temp_args.update(component_params)
+
+            # Override with config_dict if provided (highest priority)
             if "config_dict" in kwargs:
                 config_dict = kwargs["config_dict"]
-                temp_args["temperature"] = config_dict.get(f"{component}_temperature",temperature)
+
+                # Core MASAI parameters (always handled)
+                temp_args["temperature"] = config_dict.get(f"{component}_temperature", temp_args.get("temperature", temperature))
                 temp_args["memory_order"] = config_dict.get(f"{component}_memory_order", memory_order)
                 temp_args["long_context_order"] = config_dict.get(f"{component}_long_context_order", long_context_order)
+                temp_args['streaming'] = config_dict.get(f"{component}_streaming", self.streaming)
+                temp_args['streaming_callback'] = config_dict.get(f"{component}_streaming_callback", self.streaming_callback)
+
+                # Extract ALL other parameters prefixed with component name
+                # This is scalable - no hardcoded parameter lists
+                # Users should refer to wrapper docstrings for available parameters
+                component_prefix = f"{component}_"
+                core_keys = {'temperature', 'memory_order', 'long_context_order', 'streaming', 'streaming_callback'}
+
+                for config_key, value in config_dict.items():
+                    if config_key.startswith(component_prefix):
+                        # Extract parameter name (remove component prefix)
+                        param_name = config_key[len(component_prefix):]
+
+                        # Skip core parameters (already handled above)
+                        if param_name not in core_keys:
+                            temp_args[param_name] = value
+
             return temp_args
         
-        llm_router_args = override_config("router", llm_args, memory_order, long_context_order,temperature)
+        llm_router_args = override_config("router", llm_args, memory_order, long_context_order,temperature, **kwargs)
         llm_router = MASGenerativeModel(model_config["router"]["model_name"], category=model_config["router"]["category"], prompt_template=chat_prompts[0], **llm_router_args)
 
-        llm_evaluator_args = override_config("evaluator", llm_args, memory_order, long_context_order,temperature)
+        llm_evaluator_args = override_config("evaluator", llm_args, memory_order, long_context_order,temperature, **kwargs)
         llm_evaluator = MASGenerativeModel(model_config["evaluator"]["model_name"], category=model_config["evaluator"]["category"], prompt_template=chat_prompts[1], **llm_evaluator_args)
 
-        llm_reflector_args = override_config("reflector", llm_args, memory_order, long_context_order,temperature)
+        llm_reflector_args = override_config("reflector", llm_args, memory_order, long_context_order,temperature, **kwargs)
         llm_reflector = MASGenerativeModel(model_config["reflector"]["model_name"], category=model_config["reflector"]["category"], prompt_template=chat_prompts[2], **llm_reflector_args)
 
         if plan:
-            llm_planner_args = override_config("planner", llm_args, memory_order, long_context_order, temperature)
+            llm_planner_args = override_config("planner", llm_args, memory_order, long_context_order, temperature, **kwargs)
             llm_planner = MASGenerativeModel(model_config["planner"]["model_name"], category=model_config["planner"]["category"], prompt_template=chat_prompts[3], **llm_planner_args)
         else:
             llm_planner = None

@@ -1,1 +1,1 @@
-from .oman  import OMAN
+from .oman import OrchestratedMultiAgentNetwork

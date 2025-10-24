@@ -23,3 +23,5 @@ masai_server.py
 __pycache__
 tests
 examples
+.vscode/
+requirements.txt

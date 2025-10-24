@@ -141,11 +141,7 @@ class EnhancedStreamHandler:
         
         # Set streaming callback
         set_streaming_callback(self._event_callback)
-        
-        final_answer = None
-        final_reasoning = None
-        seen_reasoning = set()  # Track seen reasoning to avoid duplicates
-        
+
         try:
             # Initial assistant role signal (OpenAI-style)
             yield self._format_sse_event({
@@ -175,29 +171,15 @@ class EnhancedStreamHandler:
                     # No event available, continue
                     continue
             
-            # Get final state from agent task
-            final_state = await agent_task
-            
-            # Process final state
-            if isinstance(final_state, dict):
-                # Stream reasoning if not already streamed
-                if final_state.get("reasoning"):
-                    reasoning = final_state.get("reasoning")
-                    if reasoning not in seen_reasoning:
-                        seen_reasoning.add(reasoning)
-                        yield self._format_sse_event({
-                            "delta": {"content": reasoning},
-                            "finish_reason": None,
-                        })
-                
-                # Stream final answer
-                if final_state.get("answer"):
-                    final_answer = final_state.get("answer")
-                    yield self._format_sse_event({
-                        "delta": {"content": f"\n\n{final_answer}"},
-                        "finish_reason": None,
-                    })
-            
+            # Wait for agent task to complete
+            await agent_task
+
+            # NOTE: All streaming logic is centralized in _run_agent_stream():
+            # - Tool events: Emitted by tools via emit_event() → callback → queue
+            # - Reasoning events: Extracted from state and emitted in _run_agent_stream()
+            # - Answer events: Extracted from final state and emitted in _run_agent_stream()
+            # This ensures ALL events flow through the same queue → SSE path.
+
             # Stream completion footer
             yield self._format_sse_event({"delta": {}, "finish_reason": "stop"})
             yield "data: [DONE]\n\n"
@@ -215,9 +197,20 @@ class EnhancedStreamHandler:
             self.event_queue = None
     
     async def _run_agent_stream(self, agent, query: str, passed_from: str) -> Dict[str, Any]:
-        """Run agent with streaming and collect final state."""
+        """
+        Run agent with streaming and emit reasoning/answer events.
+
+        This method centralizes all streaming logic:
+        - Extracts reasoning and emits as events (immediately)
+        - Stores answer and emits at the end (with satisfied status)
+        - Tool events are already emitted by tools via emit_event()
+        """
+        from .streaming_events import StreamingEvent
+
         final_state = {}
-        
+        last_reasoning = None
+        final_answer = None
+
         async for state in agent.initiate_agent_astream(query, passed_from=passed_from):
             # Unwrap possible (node_name, state_dict) tuples
             actual = state
@@ -228,25 +221,62 @@ class EnhancedStreamHandler:
                     actual = next(iter(maybe.values()), maybe)
                 else:
                     actual = maybe
-            
+
             if actual and isinstance(actual, dict):
                 final_state = actual
-        
+
+                # Emit reasoning events immediately (thinking process)
+                current_reasoning = actual.get("reasoning")
+                if current_reasoning and current_reasoning != last_reasoning:
+                    last_reasoning = current_reasoning
+                    reasoning_event = StreamingEvent(
+                        event_type="reasoning",
+                        data={"reasoning": current_reasoning},
+                        metadata={"agent": agent.agent_name, "node": actual.get("current_node")}
+                    )
+                    await self.event_queue.put(reasoning_event)
+
+                # Store answer but don't emit yet (wait for end)
+                current_answer = actual.get("answer")
+                if current_answer:
+                    final_answer = current_answer
+
+        # After workflow completes, emit final answer with satisfied status
+        if final_answer and final_state:
+            is_satisfied = final_state.get("satisfied", False)
+            answer_event = StreamingEvent(
+                event_type="answer",
+                data={
+                    "answer": final_answer,
+                    "satisfied": is_satisfied
+                },
+                metadata={"agent": agent.agent_name, "node": final_state.get("current_node")}
+            )
+            await self.event_queue.put(answer_event)
+
         return final_state
 
 
 class SimpleStreamHandler:
     """
     Simple streaming handler for backward compatibility.
-    
-    This is similar to your current implementation but with better structure.
+
+    Now emits events with event_type field for frontend compatibility.
+    Note: This handler does NOT support tool events (tool_call, tool_output, custom).
+    For full event support, use EnhancedStreamHandler instead.
     """
-    
+
     def __init__(self, model: str = "mas-ai-general"):
         self.model = model
-    
-    def _format_sse_event(self, choice_data: Dict[str, Any]) -> str:
-        """Minimal OpenAI-like SSE event wrapper."""
+
+    def _format_sse_event(self, choice_data: Dict[str, Any], event_type: Optional[str] = None) -> str:
+        """
+        Format SSE event with optional event_type field.
+
+        Args:
+            choice_data: OpenAI-style choice data
+            event_type: Optional event type (reasoning, answer, etc.)
+        """
         data = {
             "id": f"chatcmpl-{int(time.time()*1000)}",
             "object": "chat.completion.chunk",
@@ -254,6 +284,11 @@ class SimpleStreamHandler:
             "model": self.model,
             "choices": [{"index": 0, **choice_data}],
         }
+
+        # Add event_type if provided (for frontend compatibility)
+        if event_type:
+            data["event_type"] = event_type
+
         return f"data: {json.dumps(data)}\n\n"
     
     async def stream_agent_execution(
@@ -276,15 +311,16 @@ class SimpleStreamHandler:
             SSE-formatted strings
         """
         final_answer = None
-        final_reasoning = None
-        
+        final_state = None
+        seen_reasoning = set()  # Track seen reasoning to avoid duplicates
+
         try:
             # Initial assistant role signal (OpenAI-style)
             yield self._format_sse_event({
                 "delta": {"role": agent_type or "assistant"},
                 "finish_reason": None
             })
-            
+
             async for state in agent.initiate_agent_astream(query, passed_from=passed_from):
                 # Unwrap possible (node_name, state_dict) tuples
                 actual = state
@@ -295,28 +331,44 @@ class SimpleStreamHandler:
                         actual = next(iter(maybe.values()), maybe)
                     else:
                         actual = maybe
-                
+
                 if not actual:
                     continue
-                
+
                 if isinstance(actual, dict):
-                    # Stream reasoning as it arrives
-                    if actual.get("reasoning"):
-                        final_reasoning = actual.get("reasoning")
-                        yield self._format_sse_event({
-                            "delta": {"content": final_reasoning},
-                            "finish_reason": None,
-                        })
-                    # Keep latest answer; defer emitting until the end to avoid duplication
+                    # Store final state for later
+                    final_state = actual
+
+                    # Stream reasoning as it arrives with event_type (avoid duplicates)
+                    current_reasoning = actual.get("reasoning")
+                    if current_reasoning and current_reasoning not in seen_reasoning:
+                        seen_reasoning.add(current_reasoning)
+                        yield self._format_sse_event(
+                            choice_data={
+                                "delta": {"content": current_reasoning},
+                                "finish_reason": None,
+                            },
+                            event_type="reasoning"  # ✅ Add event_type for frontend
+                        )
+
+                    # Keep latest answer; defer emitting until the end
                     if actual.get("answer"):
                         final_answer = actual.get("answer")
-            
-            # Emit final answer at the end
-            if final_answer:
-                yield self._format_sse_event({
-                    "delta": {"content": final_answer},
-                    "finish_reason": None,
-                })
+
+            # Emit final answer at the end with satisfied status
+            # This allows frontend to distinguish between successful and failed answers
+            if final_answer and final_state:
+                is_satisfied = final_state.get("satisfied", False)
+                yield self._format_sse_event(
+                    choice_data={
+                        "delta": {
+                            "content": final_answer,
+                            "satisfied": is_satisfied  # Include status for frontend
+                        },
+                        "finish_reason": None,
+                    },
+                    event_type="answer"  # ✅ Add event_type for frontend
+                )
             
             # Stream completion footer
             yield self._format_sse_event({"delta": {}, "finish_reason": "stop"})

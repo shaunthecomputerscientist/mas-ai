@@ -174,7 +174,7 @@ class BaseAgent:
             if self.logger: self.logger.debug(f"Filtered out Pydantic model name '{tool_name}' from tool field")
             tool_name = None
 
-        if tool_name and tool_name not in ["None", None]:
+        if tool_name and tool_name not in ["None", None,'','null','none']:
             current_state["current_tool"] = tool_name
             # Track which node decided to use this tool (for component context)
             current_state["tool_decided_by"] = node

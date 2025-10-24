@@ -4,41 +4,39 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "masai_framework"
-version = "0.3.5"  # Complete custom LangGraph with visualization
+version = "0.4.0"  # Vanilla SDK wrappers for OpenAI and Gemini, streamlined dependencies
 authors = [{ name = "PILER", email = "mrpolymathematica@gmail.com" }]
-description = "Multi-Agent System Framework for AI Agents with Custom LangGraph Implementation"
+description = "Multi-Agent System Framework for AI Agents with Vanilla SDK Wrappers and Custom LangGraph"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "langchain==0.3.15",
-    "langchain-community==0.3.15",
-    "langchain-core>=0.3.31",
-    "pydantic>=2.0",
-    "python-dotenv",
-    "huggingface-hub>=0.27.0",
-    "tqdm",
-    "sentence-transformers>=3.4.0",
-    "requests",
-    "anthropic>=0.45.0",
-    "openai>=1.60.0",
-    "ollama>=0.4.4",
-    "google-generativeai>=0.8.4",
-    "langchain-groq>=0.2.3",
-    "langchain-openai>=0.3.2",
-    "langchain-text-splitters>=0.3.5",
-    "langsmith",
-    "langchain-google-community>=2.0.4",
-    "tokenizers>=0.21.0",
-    "langchain-google-genai>=2.0.9",
+    # Vanilla SDKs for AI providers (OpenAI and Google Gemini only)
+    "openai>=2.6.0",
+    "google-generativeai==0.8.5",
+
+    # Core utilities
+    "pydantic>=2.12.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.32.0",
+    "tenacity>=9.1.0",
+    "tiktoken>=0.12.0",
     "colorama>=0.4.6",
     "json-repair>=0.39.1",
-    "tenacity>=8.5.0",
-    "tiktoken>=0.8.0",
-    "langchain-experimental",
-    "redis>=5.2.1",
-    "numpy",
-    "aiofiles>=24.1.0"
+    "aiofiles>=25.1.0",
+    "tqdm>=4.67.0",
+    "numpy==1.26.4",
+    "pandas>=2.3.3",
+
+    # Redis support
+    "redis>=6.4.0",
+
+    # Basic utilities
+    "networkx>=3.4.2"
 ]
+
+# Note: MASAI is a basic building block framework for agents.
+# LangChain dependencies have been removed - MASAI uses custom implementations.
+# should be installed separately by users as needed.
 
 [project.optional-dependencies]
 tools = []  # Temporarily empty until tools are reintroduced

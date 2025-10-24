@@ -1,24 +1,98 @@
 {
     "all":{
         "router": {
-            "model_name": "gpt-5",
-            "category": "openai",
-            "description": "OpenAI GPT-4o-mini for fast routing decisions"
+            "model_name": "gemini-2.5-pro",
+            "category": "gemini",
+            "description": "Gemini 2.5 Pro for routing with maximum reliability",
+
+            "// Core parameters": "",
+            "temperature": 0.2,
+            "max_output_tokens": 2048,
+            "top_p": 0.95,
+            "top_k": 20,
+
+            "// Thinking parameters (Gemini 2.5+)": "",
+            "thinking_budget": -1,
+
+            "// Safety settings - CRITICAL for preventing finish_reason=1 errors": "",
+            "// Use BLOCK_NONE for maximum reliability (recommended for production)": "",
+            "safety_settings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ],
+
+            "// Optional: Logprobs for debugging": "",
+            "response_logprobs": false,
+            "logprobs": 0,
+
+            "// Optional: Penalty parameters": "",
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0,
+            "seed": 42
         },
         "evaluator": {
             "model_name": "gemini-2.5-flash",
             "category": "gemini",
-            "description": "Gemini 1.5 Flash for quality evaluation"
+            "description": "Gemini 2.5 Flash for fast evaluation",
+
+            "// Core parameters": "",
+            "temperature": 0.3,
+            "max_output_tokens": 1024,
+            "top_p": 0.95,
+            "top_k": 40,
+
+            "// Thinking parameters": "",
+            "thinking_budget": -1,
+
+            "// Safety settings - Balanced approach": "",
+            "// Use BLOCK_ONLY_HIGH for moderate safety with good reliability": "",
+            "safety_settings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}
+            ]
         },
         "reflector": {
             "model_name": "gpt-5",
             "category": "openai",
-            "description": "OpenAI GPT-4o for deep reflection"
+            "description": "GPT-5 for deep reflection with reasoning",
+
+            "// Core parameters": "",
+            "// Note: temperature is ignored for reasoning models (gpt-5, o1, o3)": "",
+            "max_output_tokens": 2048,
+
+            "// Reasoning parameters (GPT-5, o1, o3, o4 only)": "",
+            "// Options: 'low', 'medium', 'high'": "",
+            "reasoning_effort": "medium",
+
+            "// Optional: Penalty parameters": "",
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0,
+            "seed": 42
         },
         "planner": {
-            "model_name": "gpt-4o-mini",
+            "model_name": "gpt-4o",
             "category": "openai",
-            "description": "OpenAI GPT-4o-mini for planning"
+            "description": "GPT-4o for planning (standard model)",
+
+            "// Core parameters": "",
+            "temperature": 0.3,
+            "max_output_tokens": 1024,
+            "top_p": 0.95,
+
+            "// Optional: Stop sequences": "",
+            "stop_sequences": ["END", "STOP"],
+
+            "// Optional: Logprobs for debugging": "",
+            "enable_logprobs": false,
+            "num_logprobs": 0,
+
+            "// Optional: Penalty parameters": "",
+            "presence_penalty": 0.0,
+            "frequency_penalty": 0.0
         }
     },
 
@@ -26,22 +100,67 @@
         "router": {
             "model_name": "gemini-1.5-flash",
             "category": "gemini",
-            "description": "Gemini 1.5 Flash for research routing"
+            "description": "Gemini 1.5 Flash for research routing",
+
+            "temperature": 0.7,
+            "max_output_tokens": 2048,
+            "top_p": 0.95,
+
+            "// Safety settings for reliability": "",
+            "safety_settings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
         },
         "evaluator": {
             "model_name": "gemini-1.5-pro",
             "category": "gemini",
-            "description": "Gemini 1.5 Pro for research evaluation"
+            "description": "Gemini 1.5 Pro for research evaluation",
+
+            "temperature": 0.5,
+            "max_output_tokens": 2048,
+            "top_p": 0.95,
+
+            "safety_settings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
         },
         "reflector": {
             "model_name": "gemini-1.5-pro",
             "category": "gemini",
-            "description": "Gemini 1.5 Pro for research reflection"
+            "description": "Gemini 1.5 Pro for research reflection",
+
+            "temperature": 0.3,
+            "max_output_tokens": 3072,
+            "top_p": 0.95,
+
+            "safety_settings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
         },
         "planner": {
             "model_name": "gemini-1.5-flash",
             "category": "gemini",
-            "description": "Gemini 1.5 Flash for research planning"
+            "description": "Gemini 1.5 Flash for research planning",
+
+            "temperature": 0.5,
+            "max_output_tokens": 1024,
+            "top_p": 0.95,
+
+            "safety_settings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
         }
     },
 

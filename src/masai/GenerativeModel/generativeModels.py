@@ -103,6 +103,10 @@ class MASGenerativeModel(BaseGenerativeModel):
                 long_context_order (int, optional): The size or order of the long context when enabled. Controls how much historical data is considered. Defaults to 10.
                 chat_log (Optional[str], optional): File path to a chat log for loading past chat data as context. Defaults to None.
                 context_callable (Optional[Callable]): Callable that uses user input to give more context to the llm.
+                streaming (bool, optional): Enable or disable streaming of responses from
+                    the model. Defaults to False.
+                streaming_callback (Optional[Callable], optional): Async callback for streaming chunks. Defaults to None.
+                **kwargs: Additional keyword arguments to be passed to the model.
             Kwargs:
                 memory_store (InMemoryDocStore) : from masai.Memory.InMemoryStore import InMemoryDocStore and use it.
                 k (int, optional) : returns top k elements from memory store matching the query
@@ -544,7 +548,7 @@ class MASGenerativeModel(BaseGenerativeModel):
             await self._update_chat_history()
 
         role = await self._update_role(agent_name,kwargs)
-        await self._update_context_callable(query=prompt)
+        await self._update_context_callable(query=prompt, role=role)
         in_memory_store_data : Optional[List] = await self._handle_in_memory_store_search(k=kwargs.get('k'), prompt=prompt)
         await self._update_component_context(component_context=component_context, role=role, prompt=prompt)
 
@@ -590,6 +594,9 @@ class MASGenerativeModel(BaseGenerativeModel):
             # Convert final response to dict if it's a model
             if hasattr(final_response, 'model_dump'):
                 response_dict = final_response.model_dump()
+            elif hasattr(final_response, 'content'):
+                # AIMessage object - streaming failed to produce Pydantic model
+                raise ValueError(f"Streaming failed to produce structured output. Got AIMessage instead: {final_response.content[:200]}")
             else:
                 response_dict = final_response
                 
