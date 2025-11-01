@@ -6,14 +6,15 @@ from ..Agents.singular_agent import Agent
 from ..pydanticModels.AnswerModel import answermodel
 from dataclasses import dataclass
 from ..prompts.prompt_templates import get_agent_prompts
+from ..Memory.LongTermMemory import QdrantConfig, RedisConfig, LongTermMemory
 @dataclass
 class AgentDetails:
     capabilities: List[str]  # e.g., ["reasoning", "coding", "science"]
     description: str = ""  # Optional additional description
     style: str = "gives very elaborate answers"  # Communication style
-    
+
 class AgentManager:
-    def __init__(self, logging=True, context:dict=None, model_config_path=None, chat_log:str=None, streaming:bool= False, streaming_callback : Optional[Callable]=None):
+    def __init__(self, logging=True, context:dict=None, model_config_path=None, chat_log:str=None, streaming:bool= False, streaming_callback : Optional[Callable]=None, user_id: Optional[Union[str, int]] = None, memory_config: Optional[Union[QdrantConfig, RedisConfig, Dict]] = None, categories_resolver: Optional[Callable] = None):
         """Initialize the AgentManager with an empty registry of agents.
 
             The AgentManager class serves as a central registry for creating, managing, and
@@ -34,6 +35,11 @@ class AgentManager:
                     function that will be called with chunks of streamed content if
                     `streaming` is True. Must be provided if `streaming` is True.
                     Defaults to None.
+                user_id (Optional[Union[str, int]], optional): User identifier for isolation of AgentManager
+                memory_config (Optional[Union[QdrantConfig, RedisConfig, Dict]], optional): Configuration for persistent memory backend.
+                    Can be QdrantConfig, RedisConfig, or a dictionary representing either.
+                categories_resolver (Optional[Callable], optional): Function to extract categories from documents for filtering.
+
 
         Attributes:
             agents (dict[str, Agent]): Dictionary storing agent instances,
@@ -59,13 +65,33 @@ class AgentManager:
         self.chat_log=chat_log
         self.streaming = streaming
         self.streaming_callback = streaming_callback
+        self.user_id: Optional[Union[str, int]] = user_id
+        self.categories_resolver = categories_resolver
+        self.long_term_memory: Optional[LongTermMemory] = None
+
         if self.streaming and not self.streaming_callback:
             raise ValueError("Streaming callback needs to be provided for streaming. Should be async callable that takes in chunks.")
-        
+
         # model_config_path should be provided by user
         if not model_config_path:
             raise ValueError("model_config_path must be provided")
         self.model_config_path = model_config_path
+
+
+        self.memory_config = memory_config
+
+        # Initialize shared LongTermMemory if memory_config is provided
+        if self.memory_config:
+            try:
+                self.long_term_memory = LongTermMemory(
+                    backend_config=self.memory_config,
+                    categories_resolver=self.categories_resolver,
+                )
+                backend_type = "Qdrant" if isinstance(self.memory_config, QdrantConfig) or (isinstance(self.memory_config, dict) and "url" in self.memory_config) else "Redis"
+                if self.logging:
+                    print(f"✅ Shared LongTermMemory initialized ({backend_type}) for user_id: {self.user_id}")
+            except Exception as e:
+                raise ValueError(f"Failed to initialize shared LongTermMemory: {e}")
 
     def load_prompts(self) -> Tuple[str, str, str]:
         """Load prompts from module."""
@@ -75,7 +101,7 @@ class AgentManager:
         """Format prompts into ChatPromptTemplates."""
         input_variables = ['question', 'history', 'schema','current_time','useful_info','coworking_agents_info','long_context']
         template = """
-        <INFO>:{useful_info}</INFO>
+        <INFO>:\n {useful_info} \n</INFO>
         \n\n<TIME>:{current_time}</TIME>
         \n\n<AVAILABLE COWORKING AGENTS>:{coworking_agents_info}</AVAILABLE COWORKING AGENTS>
         \n\n<RESPONSE FORMAT>:{schema}</RESPONSE FORMAT>
@@ -83,11 +109,11 @@ class AgentManager:
         \n\n<EXTENDED CONTEXT>:{long_context}</EXTENDED CONTEXT>
         \n<QUESTION>:{question}</QUESTION>
         """
-        
+
         human_message_template = HumanMessagePromptTemplate(
             prompt=PromptTemplate(input_variables=input_variables, template=template)
         )
-        
+
         system_message_template_1 = SystemMessagePromptTemplate(
             prompt=PromptTemplate(template =system_prompt + "\nFOLLOW THESE INSTRUCTIONS:" + router_prompt )
         )
@@ -97,11 +123,11 @@ class AgentManager:
         system_message_template_3 = SystemMessagePromptTemplate(
             prompt=PromptTemplate(template=system_prompt + "\nFOLLOW THESE INSTRUCTIONS:" + reflector_prompt )
         )
-        
+
         system_message_template_4 = SystemMessagePromptTemplate(
             prompt=PromptTemplate(template=system_prompt + "\nFOLLOW THESE INSTRUCTIONS:" + planner_prompt if planner_prompt else "")
         )
-        
+
         router_chat_prompt = ChatPromptTemplate.from_messages([system_message_template_1, human_message_template])
         evaluator_chat_prompt = ChatPromptTemplate.from_messages([system_message_template_2, human_message_template])
         reflector_chat_prompt = ChatPromptTemplate.from_messages([system_message_template_3, human_message_template])
@@ -115,10 +141,10 @@ class AgentManager:
         """Load model configuration from a JSON file."""
         if not os.path.exists(self.model_config_path):
             raise FileNotFoundError(f"Model config file not found at {self.model_config_path}.")
-        
+
         with open(self.model_config_path, "r") as f:
             data=json.load(f)
-            
+
         if agent_name in data:
             return data[agent_name]
         elif 'all' in data:
@@ -127,7 +153,7 @@ class AgentManager:
     def create_agent(self, agent_name: str, tools: List[object], agent_details: AgentDetails,
                  memory_order: int = 10, long_context: bool = True,long_context_order: int = 20, shared_memory_order: int = 10,
                  plan: bool = False,temperature=0.2,context_callable:Optional[Callable]=None,retain_messages_order: int = 10,
-                 max_tool_output_words: int = 3000, **kwargs):
+                 max_tool_output_words: int = 3000, persist_memory: Optional[bool] = None, callable_config: Optional[Dict[str, Callable]] = None, **kwargs):
         """Create and register a new agent in the AgentManager.
 
         Args:
@@ -139,10 +165,13 @@ class AgentManager:
             long_context_order (int, optional): Number of past interactions summary to keep in long context. Defaults to 10.
             shared_memory_order (int, optional): Shared memory size for components. Defaults to 10.
             plan (bool, optional): Include planner if True. Defaults to False.
-            context_callable (Optional[Callable]): Callable that uses user input to give more context to the llm during inference.
+            context_callable (Optional[Callable]): Callable that uses user input to give more context to the llm during inference. OOnly called for user queries when role='user' and not agent-to-agent delegation or internal node to node processing. Defaults to None.
             retain_messages_order (int, optional): Number of past interactions to keep in memory for an agent's internal state across multiple queries. Defaults to 10.
             max_tool_output_words (int, optional): Maximum number of words from tool output to include in LLM prompts. Defaults to 3000.
-            
+            persist_memory (Optional[bool], optional): Enable persistent memory if True. Defaults to None.
+            callable_config (Optional[Dict[str, Callable]], optional): Dictionary mapping node names to context callables. Defaults to None.
+            **kwargs: Additional keyword arguments to be passed to the agent.
+
             **kwargs: Additional keyword arguments.  Can include:
                 - `config_dict` (dict, optional): A dictionary specifying memory order overrides for individual LLMs.
                   The dictionary should have the following structure:
@@ -162,11 +191,8 @@ class AgentManager:
                       "planner_temperature": int, # temperature for planner
                   }
                   ```
-                
+
                 If a specific component's memory order is not provided in the dictionary, the default `memory_order` and `long_context_order` values will be used.
-                
-                - `in_memory_store (InMemoryDocStore) : from masai.Memory.InMemoryStore import InMemoryDocStore and set it while using LTIMS variable.
-                - `top_k (int, optional) : returns top k elements from memory store matching the query`
 
         Raises:
             ValueError: If agent_name already exists.
@@ -190,19 +216,37 @@ class AgentManager:
 
         # Initialize LLM models
         model_config = self._load_model_config(agent_name)
-        llm_args = {"temperature": temperature, "memory_order": memory_order,
-                    "extra_context": self.context,
-                    "long_context": long_context,
-                    "long_context_order":long_context_order,
-                    "chat_log":self.chat_log,
-                    "streaming": self.streaming,
-                    "streaming_callback": self.streaming_callback,
-                    "context_callable": context_callable
-                    }
-        if kwargs.get('in_memory_store'):
-            llm_args["memory_store"] = kwargs['in_memory_store']
-            llm_args['k'] = kwargs.get('top_k')
 
+        # Validate persist_memory with memory_config
+        # If persist_memory=True but no memory_config in AgentManager, raise error
+        if persist_memory is True and not self.memory_config:
+            raise ValueError(
+                "persist_memory=True requires memory_config to be set in AgentManager. "
+                "Either set memory_config in AgentManager.__init__() or set persist_memory=False."
+            )
+
+        # Determine persist_memory: use AgentManager's memory_config if available
+        effective_persist_memory = persist_memory if persist_memory is not None else (True if self.memory_config else False)
+
+        # Build llm_args with all necessary parameters
+        llm_args = {
+            "temperature": temperature,
+            "memory_order": memory_order,
+            "extra_context": self.context,
+            "long_context": long_context,
+            "long_context_order": long_context_order,
+            "chat_log": self.chat_log,
+            "streaming": self.streaming,
+            "streaming_callback": self.streaming_callback,
+            "context_callable": context_callable,
+            "callable_config": callable_config,
+            "user_id": self.user_id or kwargs.get('user_id'),
+            "long_term_memory": self.long_term_memory,  # Pass shared LongTermMemory
+            "persist_memory": effective_persist_memory,
+        }
+
+        # Remove None values to keep llm_args clean
+        llm_args = {k: v for k, v in llm_args.items() if v is not None}
 
         def extract_model_params(component_config):
             """
@@ -264,30 +308,37 @@ class AgentManager:
                             temp_args[param_name] = value
 
             return temp_args
-        
+
         llm_router_args = override_config("router", llm_args, memory_order, long_context_order,temperature, **kwargs)
+        # print("LLM R)outer Args: ", llm_router_args)
         llm_router = MASGenerativeModel(model_config["router"]["model_name"], category=model_config["router"]["category"], prompt_template=chat_prompts[0], **llm_router_args)
 
         llm_evaluator_args = override_config("evaluator", llm_args, memory_order, long_context_order,temperature, **kwargs)
+        # print("LLM Evaluator Args: ", llm_evaluator_args)
         llm_evaluator = MASGenerativeModel(model_config["evaluator"]["model_name"], category=model_config["evaluator"]["category"], prompt_template=chat_prompts[1], **llm_evaluator_args)
 
+
         llm_reflector_args = override_config("reflector", llm_args, memory_order, long_context_order,temperature, **kwargs)
+        # print("LLM Reflector Args: ", llm_reflector_args)
         llm_reflector = MASGenerativeModel(model_config["reflector"]["model_name"], category=model_config["reflector"]["category"], prompt_template=chat_prompts[2], **llm_reflector_args)
 
         if plan:
             llm_planner_args = override_config("planner", llm_args, memory_order, long_context_order, temperature, **kwargs)
+            # print("LLM Planner Args: ", llm_planner_args)
             llm_planner = MASGenerativeModel(model_config["planner"]["model_name"], category=model_config["planner"]["category"], prompt_template=chat_prompts[3], **llm_planner_args)
         else:
             llm_planner = None
 
-        agent = Agent(agent_name, llm_router, llm_evaluator, llm_reflector, llm_planner, tool_mapping, AnswerFormat, self.logging, shared_memory_order=shared_memory_order,retain_messages_order=retain_messages_order, max_tool_output_words=max_tool_output_words)
+        agent = Agent(agent_name, llm_router, llm_evaluator, llm_reflector, llm_planner, tool_mapping, AnswerFormat, self.logging, shared_memory_order=shared_memory_order, retain_messages_order=retain_messages_order, max_tool_output_words=max_tool_output_words, **kwargs)
         self.agents[agent_name.lower()] = agent
         self.agent_prompts[agent_name.lower()] = system_prompt
+        return agent
+
     def _compile_agents(self,type='decentralized',agent_context:dict=None):
         """Share agent system prompts among all registered agents.
 
         This method ensures each agent is aware of other agents' capabilities and characteristics
-        by sharing their system prompts. For each agent, it creates a dictionary of all other 
+        by sharing their system prompts. For each agent, it creates a dictionary of all other
         agents' prompts (excluding itself) and stores it in the agent's context.
 
         Example:
@@ -317,23 +368,23 @@ class AgentManager:
     def _create_system_prompt(self, agent_name: str, details: AgentDetails) -> str:
         """Convert AgentDetails into a system prompt."""
         capabilities_str = ",".join(details.capabilities)
-        
+
         prompt_parts = [
             f"\n NAME: {agent_name}.\n YOUR CHARACTERISTICS AND CAPABILITIES {capabilities_str}",
             f"RESPONSE STYLE: {details.style}."
         ]
-        
+
         if details.description:
             prompt_parts.append(details.description)
-                
+
         return "\n".join(prompt_parts)
-    
+
 
     def get_agent(self, agent_name: str)->Agent:
         """Retrieve an agent by name."""
         if agent_name.lower() not in self.agents:
             raise ValueError(f"No agent found with name '{agent_name}'.")
-        
+
         return self.agents[agent_name.lower()]
 
     def list_agents(self) -> List[str]:

@@ -1,5 +1,5 @@
 openai>=2.6.0
-google-generativeai==0.8.5
+google-genai>=1.46.0
 pydantic>=2.12.0
 python-dotenv>=1.0.0
 requests>=2.32.0
@@ -13,5 +13,6 @@ numpy==1.26.4
 pandas>=2.3.3
 redis>=6.4.0
 networkx>=3.4.2
+qdrant-client>=1.7.0
 
 [tools]

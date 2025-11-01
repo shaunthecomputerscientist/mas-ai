@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "masai_framework"
-version = "0.4.0"  # Vanilla SDK wrappers for OpenAI and Gemini, streamlined dependencies
+version = "0.4.6"  # Vanilla SDK wrappers for OpenAI and Gemini, streamlined dependencies
 authors = [{ name = "PILER", email = "mrpolymathematica@gmail.com" }]
 description = "Multi-Agent System Framework for AI Agents with Vanilla SDK Wrappers and Custom LangGraph"
 readme = "README.md"
@@ -12,7 +12,7 @@ requires-python = ">=3.9"
 dependencies = [
     # Vanilla SDKs for AI providers (OpenAI and Google Gemini only)
     "openai>=2.6.0",
-    "google-generativeai==0.8.5",
+    "google-genai>=1.46.0",
 
     # Core utilities
     "pydantic>=2.12.0",
@@ -31,7 +31,8 @@ dependencies = [
     "redis>=6.4.0",
 
     # Basic utilities
-    "networkx>=3.4.2"
+    "networkx>=3.4.2",
+    "qdrant-client>=1.7.0"
 ]
 
 # Note: MASAI is a basic building block framework for agents.

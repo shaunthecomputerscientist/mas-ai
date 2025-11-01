@@ -8,20 +8,9 @@ from ..parameter_config import (
     extract_gemini_params,
     extract_openai_params,
     validate_parameters,
-    SHARED_PARAMS,
-    MAPPED_PARAMS,
-    GEMINI_ONLY_PARAMS,
-    OPENAI_ONLY_PARAMS
 )
 
-# COMMENTED OUT - Not using these for now, can extend later
-# from langchain_community.llms.huggingface_endpoint import HuggingFaceEndpoint
-# from langchain_community.chat_models.huggingface import ChatHuggingFace
-# from langchain_community.chat_models.ollama import ChatOllama
-# from langchain_community.chat_models.anthropic import ChatAnthropic
-# from langchain_openai.chat_models import ChatOpenAI  # Replaced with vanilla wrapper
-# from langchain_google_genai.chat_models import ChatGoogleGenerativeAI  # Replaced with vanilla wrapper
-# from langchain_groq.chat_models import ChatGroq
+
 from pydantic import BaseModel
 from typing import Dict, List, Literal, Type, AsyncGenerator, Union
 from typing import Optional
@@ -97,6 +86,10 @@ class BaseGenerativeModel:
         self.verbose = kwargs.get('verbose', False) if kwargs else False
         # Store kwargs for passing to wrapper classes
         self.kwargs = kwargs
+
+        # Register embedding_model if provided (for persistent memory)
+        self.embedding_model = kwargs.get('embedding_model') if kwargs else None
+
         # Initialize the LLM
         self.model = self._get_llm()
 
@@ -153,6 +146,7 @@ class BaseGenerativeModel:
                             if self.verbose and self.logger:
                                 self.logger.info(f"✅ Thinking model '{self.model_name}' initialized with thinking_budget=-1 (dynamic)")
 
+                    # print(gemini_params)
                     llm = ChatGoogleGenerativeAI(**gemini_params)
 
                 elif "openai" in self.category:
@@ -197,59 +191,6 @@ class BaseGenerativeModel:
                                 self.logger.info(f"✅ Reasoning model '{self.model_name}' initialized with reasoning_effort='{openai_params['reasoning_effort']}' (mapped from temperature={self.temperature})")
 
                     llm = ChatOpenAI(**openai_params)
-
-                # COMMENTED OUT - Not using HuggingFace for now
-                # elif "huggingface" in self.category:
-                #     llm = ChatHuggingFace(
-                #         llm=HuggingFaceEndpoint(repo_id=self.model_name,
-                #         huggingfacehub_api_token=os.environ.get('HUGGINGFACEHUB_API_TOKEN'),
-                #         temperature=self.temperature),
-                #     )
-                # COMMENTED OUT - Not using Anthropic for now
-                # elif "antrophic" in self.category or "anthropic" in self.category:
-                #     # Check if this is a thinking/reasoning model
-                #     is_thinking_model = (
-                #         self.model_name.startswith('claude-4') or
-                #         self.model_name.startswith('claude-3.7')
-                #     )
-
-                #     model_kwargs = {}
-                #     if is_thinking_model:
-                #         # Enable extended thinking for Claude 4 and 3.7 models
-                #         # Map temperature to thinking budget tokens
-                #         if self.temperature <= 0.3:
-                #             budget_tokens = 5000  # Focused thinking
-                #         elif self.temperature <= 0.7:
-                #             budget_tokens = 10000  # Balanced thinking
-                #         else:
-                #             budget_tokens = 20000  # Deep thinking
-
-                #         model_kwargs["thinking"] = {
-                #             "type": "enabled",
-                #             "budget_tokens": budget_tokens
-                #         }
-
-                #     llm = ChatAnthropic(
-                #         model_name=self.model_name,
-                #         temperature=self.temperature,
-                #         anthropic_api_key=os.environ.get('ANTHROPIC_API_KEY'),
-                #         model_kwargs=model_kwargs if model_kwargs else None
-                #     )
-                # COMMENTED OUT - Not using Ollama for now
-                # elif "ollama" in self.category:
-                #     llm = ChatOllama(
-                #         model=self.model_name,
-                #         temperature=self.temperature,
-                #         base_url=os.environ.get(
-                #             'OLLAMA_BASE_URL',
-                #             'http://localhost:11434'  # Default local URL
-                #         ),
-                #     )
-                # COMMENTED OUT - Not using Groq for now
-                # elif "groq" in self.category:
-                #     llm = ChatGroq(model_name=self.model_name,
-                #                 temperature=self.temperature,
-                #                 api_key=os.environ.get('GROQ_API_KEY'))
 
                 else:
                     raise ValueError(f"Unsupported category: {self.category}")
@@ -493,3 +434,40 @@ class BaseGenerativeModel:
 
         # print(prompt_template.human_template)
         return prompt_template
+    
+    def _format_info_for_llm(self,data: dict) -> str:
+        """Format a dict into readable LLM-friendly text with proper structure.
+
+        Args:
+            data: Dictionary to format (can contain nested dicts, lists, or primitives)
+
+        Returns:
+            Formatted string with outer keys clearly visible and inner content preserved
+        """
+        if not data:
+            return "None"
+
+        lines = []
+        for key, value in data.items():
+            if isinstance(value, dict):
+                # Format nested dict with indentation
+                nested_lines = []
+                for nested_key, nested_value in value.items():
+                    nested_lines.append(f"    • {nested_key}: {nested_value}")
+                lines.append(f"- {key}:\n" + "\n".join(nested_lines))
+            elif isinstance(value, list):
+                # Format list items
+                list_items = []
+                for item in value:
+                    if isinstance(item, dict):
+                        # Nested dict in list
+                        for nested_key, nested_value in item.items():
+                            list_items.append(f"    • {nested_key}: {nested_value}")
+                    else:
+                        list_items.append(f"    • {item}")
+                lines.append(f"- {key}:\n" + "\n".join(list_items))
+            else:
+                # Simple key-value pair
+                lines.append(f"- {key}: {value}")
+
+        return "\n".join(lines)

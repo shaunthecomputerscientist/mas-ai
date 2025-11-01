@@ -37,7 +37,7 @@ class State(TypedDict):
 class BaseAgent:
     _logger = None
 
-    def __init__(self, agent_name: str, logging: bool = True, shared_memory_order: int = 5, retain_messages_order: int = 30, max_tool_output_words: int = 3000):
+    def __init__(self, agent_name: str, logging: bool = True, shared_memory_order: int = 5, retain_messages_order: int = 30, max_tool_output_words: int = 3000,**kwargs):
         """Base class for agents with common functionality.
 
         Args:
@@ -46,6 +46,8 @@ class BaseAgent:
             shared_memory_order: Number of messages to keep in shared memory
             retain_messages_order: Number of messages to retain across executions
             max_tool_output_words: Maximum number of words to include from tool output in LLM prompts (default: 3000)
+            character_factor: Number of characters per word (default: 10)
+            **kwargs: Additional keyword arguments (e.g., character_factor)
         """
         self.agent_name = agent_name.lower()
         self.logging = logging
@@ -58,6 +60,7 @@ class BaseAgent:
         self.tool_mapping: Dict[str, Any] = {}
         self.pydanticmodel: Optional[Type[BaseModel]] = None
         self.agent_context: Optional[Dict[str, Any]] = None
+        self.character_factor = kwargs.get('character_factor', 10)
 
         # NEW: Retained state for continuity across workflow executions
         self.retained_state: Optional[Dict[str, Any]] = None
@@ -88,25 +91,25 @@ class BaseAgent:
             return tool_output
 
         max_words = max_words or self.max_tool_output_words
-
+        max_characters = max_words * self.character_factor
         # Convert to string if not already
         tool_output_str = str(tool_output)
-
-        # Split into words
-        words = tool_output_str.split()
+       
 
         # Check if truncation is needed
-        if len(words) <= max_words:
+        if  len(tool_output_str) <= max_characters:
             return tool_output_str
-
-        # Truncate and add notice
-        truncated = ' '.join(words[:max_words])
-        truncation_notice = f"\n\n[... OUTPUT TRUNCATED: Showing first {max_words} words out of {len(words)} total words. Full output stored in state ...]"
+        else:
+            tool_output_str_start = str(tool_output)[:max_characters//2]
+            tool_output_str_end = str(tool_output)[-max_characters//2:] 
+            # Truncate and add notice
+            truncation_notice = f"\n\n[... OUTPUT TRUNCATED:Showing first {max_characters//2} characters and last {max_characters//2} characters out of {len(tool_output_str)} total characters. Full output stored in state ...]"
+            truncated = tool_output_str_start + truncation_notice + tool_output_str_end
 
         if self.logger:
-            self.logger.info(f"Tool output truncated from {len(words)} words to {max_words} words for LLM prompt")
+            self.logger.info(f"Tool output truncated from {len(tool_output_str)} words to {max_words} words for LLM prompt")
 
-        return truncated + truncation_notice
+        return truncated
 
     async def gettoolinput(self, tool_input: Union[Dict, str], tool_name: str) -> Union[Dict, str]:
         """Parse and sanitize tool input based on the tool's schema."""

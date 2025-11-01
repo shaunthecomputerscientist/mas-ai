@@ -17,6 +17,7 @@ except ImportError:
     )
 
 from .base_chat_model import BaseChatModel, AIMessage
+from ..parameter_config import MASAI_SPECIFIC_PARAMS
 
 
 class ChatOpenAI(BaseChatModel):
@@ -272,7 +273,12 @@ class ChatOpenAI(BaseChatModel):
 
         # Add standard parameters
         if self.max_output_tokens is not None:
-            params["max_tokens"] = self.max_output_tokens  # OpenAI uses "max_tokens"
+            # Reasoning models (gpt-5, o1, o3, o4) use "max_completion_tokens"
+            # Standard models use "max_tokens"
+            if self._is_reasoning_model:
+                params["max_completion_tokens"] = self.max_output_tokens
+            else:
+                params["max_tokens"] = self.max_output_tokens
 
         if self.top_p is not None:
             params["top_p"] = self.top_p
@@ -395,27 +401,26 @@ class ChatOpenAI(BaseChatModel):
         
         if self.verbose:
             print(f"🔵 OpenAI stream: {self.model}")
-        
+
         # Stream API call
         stream = self.client.chat.completions.create(**params)
-        
+
         accumulated_content = ""
         for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
                 accumulated_content += content
-                
-                # For structured output, yield parsed chunks
-                if self._is_structured_output_enabled():
-                    # Try to parse accumulated content
-                    try:
-                        parsed = self._parse_structured_output(accumulated_content)
-                        yield AIMessage(content=accumulated_content, parsed=parsed)
-                    except:
-                        # Not yet complete JSON, yield raw content
-                        yield AIMessage(content=content)
-                else:
-                    yield AIMessage(content=content)
+
+                # Stream partial chunks as AIMessage (don't parse incomplete JSON)
+                yield AIMessage(content=content)
+
+        # At the end, parse and yield the final structured output if enabled
+        if self._is_structured_output_enabled():
+            try:
+                parsed = self._parse_structured_output(accumulated_content)
+                yield parsed
+            except Exception as e:
+                raise ValueError(f"Failed to parse structured output from stream: {str(e)}\nContent: {accumulated_content}")
     
     async def astream(self, messages: Union[str, List[Dict[str, str]]]) -> AsyncGenerator[AIMessage, None]:
         """
@@ -438,27 +443,19 @@ class ChatOpenAI(BaseChatModel):
         stream = await self.async_client.chat.completions.create(**params)
 
         accumulated_content = ""
-        last_parsed = None
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
                 content = chunk.choices[0].delta.content
                 accumulated_content += content
 
-                # For structured output, yield parsed chunks
-                if self._is_structured_output_enabled():
-                    # Try to parse accumulated content
-                    try:
-                        parsed = self._parse_structured_output(accumulated_content)
-                        last_parsed = parsed
-                        yield AIMessage(content=accumulated_content, parsed=parsed)
-                    except:
-                        # Not yet complete JSON, yield raw content
-                        yield AIMessage(content=content)
-                else:
-                    yield AIMessage(content=content)
+                # Stream partial chunks as AIMessage (don't parse incomplete JSON)
+                yield AIMessage(content=content)
 
-        # For structured output, yield the final Pydantic model instance
-        # This is what MASAI expects (has model_dump() method)
-        if self._is_structured_output_enabled() and last_parsed:
-            yield last_parsed
+        # At the end, parse and yield the final structured output if enabled
+        if self._is_structured_output_enabled():
+            try:
+                parsed = self._parse_structured_output(accumulated_content)
+                yield parsed
+            except Exception as e:
+                raise ValueError(f"Failed to parse structured output from astream: {str(e)}\nContent: {accumulated_content}")
 

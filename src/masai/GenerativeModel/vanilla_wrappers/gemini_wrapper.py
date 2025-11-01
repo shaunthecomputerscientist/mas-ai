@@ -10,13 +10,14 @@ from pydantic import BaseModel
 import json
 
 try:
-    import google.generativeai as genai
+    import google.genai as genai
 except ImportError:
     raise ImportError(
-        "Google Generative AI SDK not installed. Install with: pip install google-generativeai>=0.8.5"
+        "Google Generative AI SDK not installed. Install with: pip install google-genai>=1.0.0"
     )
 
 from .base_chat_model import BaseChatModel, AIMessage
+from ..parameter_config import MASAI_SPECIFIC_PARAMS
 
 
 class ChatGoogleGenerativeAI(BaseChatModel):
@@ -149,6 +150,7 @@ class ChatGoogleGenerativeAI(BaseChatModel):
         presence_penalty: Optional[float] = None,
         frequency_penalty: Optional[float] = None,
         seed: Optional[int] = None,
+        show_thinking: Optional[bool] = True,
 
         # Catch-all for future parameters
         model_kwargs: Optional[Dict[str, Any]] = None,
@@ -181,16 +183,24 @@ class ChatGoogleGenerativeAI(BaseChatModel):
         self.presence_penalty = presence_penalty
         self.frequency_penalty = frequency_penalty
         self.seed = seed
-        self.model_kwargs = model_kwargs or {}
+        self.show_thinking = show_thinking
 
-        # Configure Google Generative AI
-        genai.configure(api_key=self.api_key)
+        # Filter out MASAI-specific parameters before storing in model_kwargs
+        # These should NOT be passed to Gemini API
+        filtered_kwargs = {
+            k: v for k, v in kwargs.items()
+            if k not in MASAI_SPECIFIC_PARAMS
+        }
+        self.model_kwargs = {**(model_kwargs or {}), **filtered_kwargs}
+
+        # Initialize Google Generative AI client (new google-genai SDK)
+        self.client = genai.Client(api_key=self.api_key)
 
         # Check if this is a thinking model
         self._is_thinking_model = self._check_thinking_model()
 
         if self.verbose:
-            print(f"✅ Initialized {self.__class__.__name__}(model='{self.model}', thinking={self._is_thinking_model})")
+            print(f"[OK] Initialized {self.__class__.__name__}(model='{self.model}', thinking={self._is_thinking_model})")
     
     def _check_thinking_model(self) -> bool:
         """Check if the model is a thinking/reasoning model."""
@@ -219,60 +229,80 @@ class ChatGoogleGenerativeAI(BaseChatModel):
         """
         Prepare generation configuration for Gemini API.
 
-        Returns:
-            Dict of generation config parameters
-        """
-        config = {
-            "temperature": self.temperature,
-        }
+        Converts snake_case parameters to camelCase as required by google-genai SDK.
+        Nests thinking_budget under thinkingConfig for thinking models.
 
-        # Add standard parameters
+        Returns:
+            Dict of generation config parameters in camelCase
+        """
+        config = {}
+
+        # ===== CORE PARAMETERS (camelCase) =====
+        if self.temperature is not None:
+            config["temperature"] = self.temperature
+
         if self.max_output_tokens is not None:
-            config["max_output_tokens"] = self.max_output_tokens
+            config["maxOutputTokens"] = self.max_output_tokens
 
         if self.top_p is not None:
-            config["top_p"] = self.top_p
+            config["topP"] = self.top_p
 
         if self.top_k is not None:
-            config["top_k"] = self.top_k
+            config["topK"] = self.top_k
 
-        # Add thinking budget for thinking models
-        if self._is_thinking_model:
+        # ===== THINKING CONFIG (nested for thinking models) =====
+        # NOTE: Thinking is incompatible with structured output (JSON response mime type)
+        if self._is_thinking_model and not self._is_structured_output_enabled():
+            thinking_config = {}
+
+            # Set thinking budget (default to -1 for dynamic thinking)
             if self.thinking_budget is not None:
-                config["thinking_budget"] = self.thinking_budget
-            elif "thinkingBudget" in self.model_kwargs:
-                # Backward compatibility
-                config["thinking_budget"] = self.model_kwargs["thinkingBudget"]
+                thinking_config["thinkingBudget"] = self.thinking_budget
+            else:
+                # Default: dynamic thinking (-1)
+                thinking_config["thinkingBudget"] = -1
 
-        # Add stop sequences
+            # Optionally include thoughts in response
+            thinking_config["includeThoughts"] = True
+
+            config["thinkingConfig"] = thinking_config
+
+        # ===== STOP SEQUENCES =====
         if self.stop_sequences is not None:
-            config["stop_sequences"] = self.stop_sequences
+            config["stopSequences"] = self.stop_sequences
 
-        # Add candidate count
+        # ===== CANDIDATE COUNT =====
         if self.candidate_count is not None:
-            config["candidate_count"] = self.candidate_count
+            config["candidateCount"] = self.candidate_count
 
-        # Add response logprobs
+        # ===== LOGPROBS PARAMETERS =====
+        # Note: logprobs can only be specified if response_logprobs is true
         if self.response_logprobs is not None:
-            config["response_logprobs"] = self.response_logprobs
+            config["responseLogprobs"] = self.response_logprobs
 
-        # Add logprobs
-        if self.logprobs is not None:
-            config["logprobs"] = self.logprobs
+            # Only include logprobs if response_logprobs is True and logprobs is set
+            if self.response_logprobs and self.logprobs is not None:
+                # Ensure logprobs is in valid range [0, 20]
+                logprobs_value = min(max(self.logprobs, 0), 20)
+                config["logprobs"] = logprobs_value
+        elif self.logprobs is not None and self.logprobs > 0:
+            # If logprobs is set but response_logprobs is not, enable response_logprobs
+            config["responseLogprobs"] = True
+            logprobs_value = min(max(self.logprobs, 0), 20)
+            config["logprobs"] = logprobs_value
 
-        # Add presence penalty
+        # ===== PENALTY PARAMETERS =====
         if self.presence_penalty is not None:
-            config["presence_penalty"] = self.presence_penalty
+            config["presencePenalty"] = self.presence_penalty
 
-        # Add frequency penalty
         if self.frequency_penalty is not None:
-            config["frequency_penalty"] = self.frequency_penalty
+            config["frequencyPenalty"] = self.frequency_penalty
 
-        # Add seed
+        # ===== SEED =====
         if self.seed is not None:
             config["seed"] = self.seed
 
-        # Add structured output configuration
+        # ===== STRUCTURED OUTPUT CONFIGURATION =====
         if self._is_structured_output_enabled():
             # Get raw Pydantic schema (NOT OpenAI-processed schema)
             # OpenAI's _get_json_schema() forces all fields to be required, which we don't want for Gemini
@@ -285,15 +315,31 @@ class ChatGoogleGenerativeAI(BaseChatModel):
                 print("🔍 DEBUG: Gemini schema being sent:")
                 print(json.dumps(cleaned_schema, indent=2))
 
-            config["response_mime_type"] = "application/json"
-            config["response_schema"] = cleaned_schema
+            config["responseMimeType"] = "application/json"
+            config["responseSchema"] = cleaned_schema
 
-        # Add any extra model_kwargs (but not thinkingBudget again)
+        # ===== SAFETY SETTINGS =====
+        if self.safety_settings is not None:
+            config["safetySettings"] = self.safety_settings
+
+        # ===== PASS THROUGH EXTRA MODEL_KWARGS =====
+        # Convert snake_case keys to camelCase for any extra kwargs
         for key, value in self.model_kwargs.items():
-            if key not in ["thinkingBudget"] and key not in config:
-                config[key] = value
+            # Skip keys we've already handled
+            if key in ["thinkingBudget", "thinking_budget"]:
+                continue
+
+            # Convert snake_case to camelCase for known parameters
+            camel_key =key
+            if camel_key not in config:
+                config[camel_key] = value
 
         return config
+
+    def _snake_to_camel(self, snake_str: str) -> str:
+        """Convert snake_case to camelCase."""
+        components = snake_str.split('_')
+        return components[0] + ''.join(x.title() for x in components[1:])
     
     def _convert_to_gemini_schema(self, json_schema: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -466,14 +512,13 @@ class ChatGoogleGenerativeAI(BaseChatModel):
         if self.verbose:
             print(f"🟢 Gemini invoke: {self.model}")
 
-        # Create model instance
-        model_instance = genai.GenerativeModel(
-            model_name=self.model,
-            generation_config=config
+        # Make API call using new google-genai SDK
+        # client.models.generate_content(model, contents, config)
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config=genai.types.GenerateContentConfig(**config)
         )
-
-        # Make API call
-        response = model_instance.generate_content(prompt)
 
         # Check if response has valid content
         try:
@@ -509,12 +554,23 @@ class ChatGoogleGenerativeAI(BaseChatModel):
         if self._is_structured_output_enabled():
             # Gemini returns parsed object directly
             if hasattr(response, 'parsed') and response.parsed:
-                # Return Pydantic model directly (MASAI expects .model_dump() method)
-                return response.parsed
-            else:
-                # Fallback to manual parsing
+                parsed_obj = response.parsed
+
+                # If it's already a Pydantic model, return it
+                if hasattr(parsed_obj, 'model_dump'):
+                    return parsed_obj
+
+                # If it's a dict, convert it to Pydantic model
+                if isinstance(parsed_obj, dict):
+                    return self._structured_output_schema(**parsed_obj)
+
+                # Otherwise, try to parse as JSON string
+                if isinstance(parsed_obj, str):
+                    return self._parse_structured_output(parsed_obj)
+
+            # Fallback to manual parsing from content
+            if content:
                 parsed = self._parse_structured_output(content)
-                # Return Pydantic model directly (MASAI expects .model_dump() method)
                 return parsed
 
         return AIMessage(content=content)
@@ -542,7 +598,8 @@ class ChatGoogleGenerativeAI(BaseChatModel):
             messages: String prompt or list of message dicts
 
         Yields:
-            AIMessage chunks with incremental content
+            AIMessage chunks with incremental content (including reasoning, code, data, etc.)
+            For structured output: yields partial chunks, then final parsed model at end
         """
         normalized_messages = self._normalize_messages(messages)
         prompt = self._normalize_messages_to_gemini(normalized_messages)
@@ -551,43 +608,104 @@ class ChatGoogleGenerativeAI(BaseChatModel):
         if self.verbose:
             print(f"🟢 Gemini stream: {self.model}")
 
-        # Create model instance
-        model_instance = genai.GenerativeModel(
-            model_name=self.model,
-            generation_config=config
+        # Stream API call using new google-genai SDK
+        response_stream = self.client.models.generate_content_stream(
+            model=self.model,
+            contents=prompt,
+            config=genai.types.GenerateContentConfig(**config)
         )
 
-        # Stream API call
-        response_stream = model_instance.generate_content(prompt, stream=True)
-
         accumulated_content = ""
-        for chunk in response_stream:
-            if hasattr(chunk, 'text') and chunk.text:
-                content = chunk.text
-                accumulated_content += content
+        text_only_content = ""  # For structured output parsing (text only, no thinking)
+        last_parsed = None
 
-                # For structured output, yield parsed chunks
-                if self._is_structured_output_enabled():
-                    # Try to parse accumulated content
-                    try:
-                        parsed = self._parse_structured_output(accumulated_content)
-                        yield AIMessage(content=accumulated_content, parsed=parsed)
-                    except:
-                        # Not yet complete JSON, yield raw content
-                        yield AIMessage(content=content)
-                else:
+        for chunk in response_stream:
+            try:
+                # Gemini chunks often have candidates with content parts
+                if hasattr(chunk, "candidates") and chunk.candidates:
+                    parts = getattr(chunk.candidates[0].content, "parts", [])
+
+                    for part in parts:
+                        content_piece = None
+                        is_text_part = False
+
+                        # Handle various part types
+                        if hasattr(part, "text") and part.text:
+                            content_piece = part.text
+                            is_text_part = True
+                        elif hasattr(part, "thinking") and part.thinking and self.show_thinking:
+                            content_piece = f"[THINKING] {part.thinking}"
+                        elif hasattr(part, "code") and part.code:
+                            content_piece = f"[CODE] {part.code}"
+                        elif hasattr(part, "function_call") and part.function_call:
+                            content_piece = f"[FUNCTION_CALL] {part.function_call}"
+                        elif hasattr(part, "data") and part.data:
+                            import json
+                            content_piece = f"[DATA] {json.dumps(part.data, indent=2)}"
+
+                        if not content_piece:
+                            continue  # Skip if no usable content
+
+                        # Accumulate all content for display
+                        accumulated_content += content_piece
+
+                        # For structured output, only accumulate text parts (not thinking)
+                        if is_text_part:
+                            text_only_content += content_piece
+
+                        # For structured output: yield partial chunks as AIMessage
+                        # Don't try to parse incomplete JSON - just stream the text
+                        yield AIMessage(content=content_piece)
+
+                # Handle text-only fallback (older SDKs or simplified chunks)
+                elif hasattr(chunk, "text") and chunk.text:
+                    content = chunk.text
+                    accumulated_content += content
                     yield AIMessage(content=content)
+
+            except ValueError as e:
+                # Handle blocked or filtered responses
+                error_msg = f"Gemini blocked response: {str(e)}"
+                if hasattr(chunk, 'candidates') and chunk.candidates:
+                    finish_reason = chunk.candidates[0].finish_reason
+                    reason_map = {
+                        1: "STOP (no content generated - likely safety filter or empty prompt)",
+                        2: "MAX_TOKENS (response too long)",
+                        3: "SAFETY (content filtered by safety settings)",
+                        4: "RECITATION (content blocked due to recitation)",
+                        5: "OTHER (unknown error)"
+                    }
+                    readable_reason = reason_map.get(finish_reason, f"Unknown ({finish_reason})")
+                    error_msg = f"Gemini error: {readable_reason}. Original error: {str(e)}"
+
+                if self.verbose:
+                    print(f"❌ {error_msg}")
+
+                raise ValueError(error_msg)
+
+        # At the end, parse and yield the final structured output if enabled
+        if self._is_structured_output_enabled():
+            try:
+                last_parsed = self._parse_structured_output(text_only_content)
+                yield last_parsed
+            except Exception as e:
+                raise ValueError(f"Failed to parse structured output from stream: {str(e)}\nContent: {text_only_content}")
+
     
     async def astream(self, messages: Union[str, List[Dict[str, str]]]) -> AsyncGenerator[AIMessage, None]:
         """
-        Asynchronously stream response chunks.
+        Asynchronously stream response chunks from Gemini.
+
+        Handles multi-part outputs (text, reasoning, code, data, function_call)
+        and supports structured output parsing in real-time.
 
         Args:
-            messages: String prompt or list of message dicts
+            messages: String prompt or list of message dicts.
 
         Yields:
-            AIMessage chunks with incremental content
+            AIMessage objects (streamed incrementally).
         """
+        # --- Normalize and prepare request ---
         normalized_messages = self._normalize_messages(messages)
         prompt = self._normalize_messages_to_gemini(normalized_messages)
         config = self._prepare_generation_config()
@@ -595,85 +713,106 @@ class ChatGoogleGenerativeAI(BaseChatModel):
         if self.verbose:
             print(f"🟢 Gemini astream: {self.model}")
 
-        # Note: Google SDK doesn't have native async streaming yet
-        # We'll use asyncio.to_thread to run sync streaming in async context
         import asyncio
-
-        # Create a queue for chunks
         from queue import Queue
+        import threading
+        import json
+
+        # --- Thread-safe queue for streamed chunks ---
         chunk_queue = Queue()
         done_sentinel = object()
 
+        # --- Worker function (runs in background thread) ---
         def stream_worker():
             last_parsed = None
+            accumulated_content = ""
+            text_only_content = ""  # For structured output parsing (text only, no thinking)
             try:
-                # Create model instance
-                model_instance = genai.GenerativeModel(
-                    model_name=self.model,
-                    generation_config=config
+                # Start stream using new google-genai SDK
+                response_stream = self.client.models.generate_content_stream(
+                    model=self.model,
+                    contents=prompt,
+                    config=genai.types.GenerateContentConfig(**config)
                 )
 
-                # Stream API call
-                response_stream = model_instance.generate_content(prompt, stream=True)
-
-                accumulated_content = ""
+                # --- Process streamed chunks ---
                 for chunk in response_stream:
-                    # Check if chunk has text content
-                    if hasattr(chunk, 'text'):
-                        try:
-                            content = chunk.text
-                            accumulated_content += content
+                    # Some chunks may not have candidates (metadata only)
+                    if hasattr(chunk, "candidates") and chunk.candidates:
+                        parts = getattr(chunk.candidates[0].content, "parts", [])
 
-                            # For structured output, yield parsed chunks
-                            if self._is_structured_output_enabled():
-                                try:
-                                    parsed = self._parse_structured_output(accumulated_content)
-                                    last_parsed = parsed
-                                    chunk_queue.put(AIMessage(content=accumulated_content, parsed=parsed))
-                                except:
-                                    chunk_queue.put(AIMessage(content=content))
-                            else:
-                                chunk_queue.put(AIMessage(content=content))
-                        except ValueError as e:
-                            # Gemini blocked response (safety filter or validation error)
-                            # Check finish_reason to determine cause
-                            error_msg = f"Gemini blocked response: {str(e)}"
-                            if hasattr(chunk, 'candidates') and chunk.candidates:
-                                finish_reason = chunk.candidates[0].finish_reason
+                        for part in parts:
+                            content_piece = None
+                            is_text_part = False
 
-                                # Map finish_reason to human-readable message
-                                reason_map = {
-                                    1: "STOP (no content generated - likely safety filter or empty prompt)",
-                                    2: "MAX_TOKENS (response too long)",
-                                    3: "SAFETY (content filtered by safety settings)",
-                                    4: "RECITATION (content blocked due to recitation)",
-                                    5: "OTHER (unknown error)"
-                                }
-                                readable_reason = reason_map.get(finish_reason, f"Unknown ({finish_reason})")
-                                error_msg = f"Gemini error: {readable_reason}. Original error: {str(e)}"
+                            # Handle multiple part types gracefully
+                            if hasattr(part, "text") and part.text:
+                                content_piece = part.text
+                                is_text_part = True
+                            elif hasattr(part, "thinking") and part.thinking and self.show_thinking:
+                                content_piece = f"[THINKING] {part.thinking}"
+                            elif hasattr(part, "code") and part.code:
+                                content_piece = f"[CODE] {part.code}"
+                            elif hasattr(part, "function_call") and part.function_call:
+                                content_piece = f"[FUNCTION_CALL] {part.function_call}"
+                            elif hasattr(part, "data") and part.data:
+                                content_piece = f"[DATA] {json.dumps(part.data, indent=2)}"
 
-                            # Raise exception to be caught by outer try-except
-                            raise ValueError(error_msg)
+                            # Only process if we have real content
+                            if content_piece:
+                                accumulated_content += content_piece
 
-                # For structured output, yield the final Pydantic model instance
-                # This is what MASAI expects (has model_dump() method)
-                if self._is_structured_output_enabled() and last_parsed:
-                    chunk_queue.put(last_parsed)
-                elif self._is_structured_output_enabled() and not last_parsed:
-                    # No valid parsed response - raise error
-                    raise ValueError("No valid structured output received from Gemini")
+                                # For structured output, only accumulate text parts (not thinking)
+                                if is_text_part:
+                                    text_only_content += content_piece
+
+                                # Stream partial chunks as AIMessage (don't parse incomplete JSON)
+                                chunk_queue.put(AIMessage(content=content_piece))
+
+                    # Handle possible blocking or completion events gracefully
+                    elif hasattr(chunk, "candidates") and chunk.candidates == []:
+                        continue
+                    else:
+                        continue
+
+            except ValueError as e:
+                # Handle Gemini-specific "no valid Part" or safety filter exceptions
+                error_msg = f"Gemini stream error: {str(e)}"
+                if hasattr(chunk, 'candidates') and chunk.candidates:
+                    finish_reason = chunk.candidates[0].finish_reason
+                    reason_map = {
+                        1: "STOP (no content generated)",
+                        2: "MAX_TOKENS (response too long)",
+                        3: "SAFETY (content filtered)",
+                        4: "RECITATION (blocked content)",
+                        5: "OTHER (unknown)"
+                    }
+                    readable_reason = reason_map.get(finish_reason, f"Unknown ({finish_reason})")
+                    error_msg = f"Gemini error: {readable_reason}. Original error: {str(e)}"
+                raise ValueError(error_msg)
+
             finally:
+                # --- Push final parsed model if structured output enabled ---
+                if self._is_structured_output_enabled():
+                    try:
+                        parsed = self._parse_structured_output(text_only_content)
+                        chunk_queue.put(parsed)
+                    except Exception as e:
+                        # Put error message in queue
+                        error_msg = f"Failed to parse structured output: {str(e)}"
+                        chunk_queue.put(ValueError(error_msg))
                 chunk_queue.put(done_sentinel)
 
-        # Start streaming in background thread
-        import threading
-        thread = threading.Thread(target=stream_worker)
+        # --- Start stream worker thread ---
+        thread = threading.Thread(target=stream_worker, daemon=True)
         thread.start()
 
-        # Yield chunks from queue
+        # --- Async generator: yield chunks as they arrive ---
         while True:
             chunk = await asyncio.to_thread(chunk_queue.get)
             if chunk is done_sentinel:
                 break
+            # If chunk is an error, raise it
+            if isinstance(chunk, Exception):
+                raise chunk
             yield chunk
-

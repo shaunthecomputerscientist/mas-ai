@@ -4,7 +4,7 @@ This is a drop-in replacement that maintains API compatibility.
 """
 
 from typing import Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class Document(BaseModel):
@@ -36,17 +36,15 @@ class Document(BaseModel):
         description="Optional metadata associated with the document"
     )
     
-    class Config:
-        """Pydantic configuration."""
-        # Allow arbitrary types for metadata values
-        arbitrary_types_allowed = True
-        # Enable JSON schema generation
-        json_schema_extra = {
-            "example": {
-                "page_content": "This is a sample document.",
-                "metadata": {"source": "example.txt", "page": 1}
+    model_config = ConfigDict(
+            arbitrary_types_allowed=True,
+            json_schema_extra={
+                "example": {
+                    "page_content": "This is a sample document.",
+                    "metadata": {"source": "example.txt", "page": 1}
+                }
             }
-        }
+        )
     
     def __init__(self, page_content: str, metadata: Optional[Dict[str, Any]] = None, **kwargs):
         """

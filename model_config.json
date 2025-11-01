@@ -1,36 +1,21 @@
 {
     "all":{
         "router": {
-            "model_name": "gemini-2.5-pro",
+            "model_name": "gemini-2.5-flash",
             "category": "gemini",
             "description": "Gemini 2.5 Pro for routing with maximum reliability",
 
             "// Core parameters": "",
             "temperature": 0.2,
-            "max_output_tokens": 2048,
-            "top_p": 0.95,
-            "top_k": 20,
 
-            "// Thinking parameters (Gemini 2.5+)": "",
-            "thinking_budget": -1,
-
-            "// Safety settings - CRITICAL for preventing finish_reason=1 errors": "",
-            "// Use BLOCK_NONE for maximum reliability (recommended for production)": "",
             "safety_settings": [
                 {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
                 {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
                 {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
                 {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-            ],
+            ]
 
-            "// Optional: Logprobs for debugging": "",
-            "response_logprobs": false,
-            "logprobs": 0,
 
-            "// Optional: Penalty parameters": "",
-            "presence_penalty": 0.0,
-            "frequency_penalty": 0.0,
-            "seed": 42
         },
         "evaluator": {
             "model_name": "gemini-2.5-flash",
@@ -66,7 +51,7 @@
 
             "// Reasoning parameters (GPT-5, o1, o3, o4 only)": "",
             "// Options: 'low', 'medium', 'high'": "",
-            "reasoning_effort": "medium",
+            "reasoning_effort": "low",
 
             "// Optional: Penalty parameters": "",
             "presence_penalty": 0.0,

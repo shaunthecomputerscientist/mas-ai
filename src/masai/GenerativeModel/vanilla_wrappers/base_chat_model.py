@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator, Dict, List, Optional, Type, Union
 from pydantic import BaseModel
 import json
+from ..parameter_config import MASAI_SPECIFIC_PARAMS
 
 
 class AIMessage:
@@ -56,7 +57,12 @@ class BaseChatModel(ABC):
         self.temperature = temperature
         self.api_key = api_key
         self.verbose = verbose
-        self.extra_kwargs = kwargs
+        # Filter out MASAI-specific parameters before storing in extra_kwargs
+        # These should NOT be passed to model APIs
+        self.extra_kwargs = {
+            k: v for k, v in kwargs.items()
+            if k not in MASAI_SPECIFIC_PARAMS
+        }
         
         # Structured output configuration
         self._structured_output_schema: Optional[Type[BaseModel]] = None
@@ -121,29 +127,20 @@ class BaseChatModel(ABC):
         method: str = "json_mode"
     ) -> "BaseChatModel":
         """
-        Create a new instance configured for structured output.
-        
+        Configure the current instance for structured output.
+
         Args:
             schema: Pydantic model defining the output structure
             method: Method to use ("json_mode" or "function_calling")
-        
+
         Returns:
-            New instance of the model configured for structured output
+            Self with structured output configured (no new instance created)
         """
-        # Create a copy of the current instance
-        new_instance = self.__class__(
-            model=self.model,
-            temperature=self.temperature,
-            api_key=self.api_key,
-            verbose=self.verbose,
-            **self.extra_kwargs
-        )
-        
-        # Configure structured output
-        new_instance._structured_output_schema = schema
-        new_instance._structured_output_method = method
-        
-        return new_instance
+        # Configure structured output on current instance
+        self._structured_output_schema = schema
+        self._structured_output_method = method
+
+        return self
     
     def _normalize_messages(
         self,

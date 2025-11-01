@@ -459,13 +459,24 @@ def handle_tool_input(parsed_dict):
     return parsed_dict
 
 def parser(stream):
-    # Step 1: Clean the input
-    cleaned_text = clean_input(stream)
+    # FIXED: Removed clean_input() which was corrupting code with single quotes
+    #
+    # The clean_input() function was replacing ALL single quotes with double quotes,
+    # breaking JSON parsing for code like: {"code": "db['clients'].find(...)"}
+    #
+    # parse_json() already has repair logic to handle malformed JSON,
+    # so we don't need the aggressive quote replacement.
+    #
+    # Flow:
+    # 1. parse_json() → Tries direct parsing, then repair if needed
+    # 2. handle_tool_input() → Handles tool_input field specifically
+    # 3. parse_tool_input() → Has fallback extraction for truly malformed JSON
 
-    # Step 2: Parse the cleaned text into a dictionary
-    parsed_dict = parse_json(cleaned_text)
+    # Step 1: Parse the input directly (no cleaning needed)
+    # parse_json() handles repair automatically
+    parsed_dict = parse_json(stream)
 
-    # Step 3: Handle tool_input field specifically
+    # Step 2: Handle tool_input field specifically
     parsed_dict = handle_tool_input(parsed_dict)
 
     return parsed_dict

@@ -35,9 +35,9 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
             shared_memory_order: Number of messages to keep in shared memory
             retain_messages_order: Number of messages to retain across executions
             max_tool_output_words: Maximum number of words from tool output to include in LLM prompts (default: 3000)
-            **kwargs: Additional keyword arguments (e.g., max_tool_loop)
+            **kwargs: Additional keyword arguments (e.g., max_tool_loop, character_factor)
         """
-        super().__init__(agent_name, logging, shared_memory_order, retain_messages_order, max_tool_output_words)
+        super().__init__(agent_name, logging, shared_memory_order, retain_messages_order, max_tool_output_words, **kwargs)
         self.llm_router = llm_router
         self.llm_evaluator = llm_evaluator
         self.llm_reflector = llm_reflector
@@ -81,7 +81,9 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
             "agent_context": self.agent_context,
             "agent_name": self.agent_name,
             "component_context": component_context or [],
-            "passed_from": state.get('passed_from')
+            "passed_from": state.get('passed_from'),
+            "query": state.get('current_question'),
+            "node": node
         }
 
         parsed_response = None

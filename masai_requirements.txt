@@ -7,7 +7,7 @@
 # AI/ML PROVIDER SDKs (REQUIRED)
 # ============================================================================
 openai>=2.6.0                    # OpenAI SDK (GPT-4o, GPT-5, o1, o3, o4, gpt-4.1)
-google-generativeai==0.8.5       # Google Gemini SDK (version locked for compatibility)
+google-genai>=1.46.0             # Google Gemini SDK (new SDK with structured output support)
 
 # COMMENTED OUT - Not using these providers for now
 # anthropic>=0.71.0                # Anthropic SDK (Claude models)
@@ -50,6 +50,8 @@ redis>=6.4.0                     # Redis caching support
 # BASIC UTILITIES (REQUIRED)
 # ============================================================================
 networkx>=3.4.2                  # Graph manipulation for agent workflows
+qdrant-client>=1.7.0                 # Qdrant vector database for persistent memory
+
 
 # ============================================================================
 # TOOLS AND UTILITIES (NOT INCLUDED - USER SHOULD INSTALL AS NEEDED)

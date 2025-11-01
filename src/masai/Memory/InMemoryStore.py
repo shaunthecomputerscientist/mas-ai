@@ -20,9 +20,10 @@ from ..schema import Document
 #     Document = None  # Fallback if LangChain isn’t installed
 
 class InMemoryDocStore:
-    def __init__(self, documents: Optional[List[Union[str, Document]]] = None, 
-                 ids: Optional[List[str]] = None, 
-                 embedding_model: Optional[Union[str, Callable, object]] = 'all-MiniLM-L6-v2'):
+    def __init__(self, documents: Optional[List[Union[str, Document]]] = None,
+                 ids: Optional[List[str]] = None,
+                 embedding_model: Optional[Union[str, Callable, object]] = 'all-MiniLM-L6-v2',
+                 max_documents: Optional[int] = None):
         """
         Initialize the custom document store.
 
@@ -34,10 +35,14 @@ class InMemoryDocStore:
                 - A callable (function) that takes a list of strings and returns embeddings (list or np.ndarray).
                 - An object with an `embed_documents` method (e.g., LangChain Embeddings for compatibility).
                 If None, no embeddings are computed until a model is provided.
+            max_documents: Optional maximum number of documents to retain in memory. If set,
+                the store enforces a FIFO eviction policy to cap memory usage.
         """
         self.doc_store = {}
         self.ids = []
         self.next_id = 0
+        self.max_documents = max_documents
+
         self.embedding_matrix = None
 
         # Set up embedding model
@@ -135,6 +140,27 @@ class InMemoryDocStore:
         else:
             self.embedding_matrix = np.vstack([self.embedding_matrix, embeddings])
 
+        # Prune if exceeding capacity
+        self._prune_to_limit()
+
+    def _prune_to_limit(self) -> None:
+        """Ensure the store does not exceed max_documents (FIFO eviction)."""
+        if self.max_documents is None:
+            return
+        excess = len(self.ids) - self.max_documents
+        if excess <= 0:
+            return
+        # Evict oldest entries
+        old_ids = self.ids[:excess]
+        for oid in old_ids:
+            self.doc_store.pop(oid, None)
+        self.ids = self.ids[excess:]
+        if self.embedding_matrix is not None:
+            if excess >= len(self.embedding_matrix):
+                self.embedding_matrix = None
+            else:
+                self.embedding_matrix = self.embedding_matrix[excess:]
+
     def add_documents(self, documents: List[Union[str, Document]], ids: Optional[List[str]] = None):
         """
         Add new documents to the store.
@@ -163,6 +189,10 @@ class InMemoryDocStore:
         if self.embedding_model:
             self._update_embeddings(documents)
 
+        # Ensure capacity after adding documents (handles non-embedding case too)
+        self._prune_to_limit()
+
+
     def get_document(self, id_: str) -> Optional[dict]:
         """
         Retrieve a document by its ID.
@@ -188,7 +218,7 @@ class InMemoryDocStore:
         """
         if not self.embedding_model or self.embedding_matrix is None:
             return [self.doc_store[id_] for id_ in self.ids[:min(k, len(self.ids))]]
-        
+
         if isinstance(self.embedding_model, SentenceTransformer):
             query_emb = self.embedding_model.encode(query, convert_to_numpy=True)
         elif callable(self.embedding_model):
@@ -198,8 +228,21 @@ class InMemoryDocStore:
         else:
             raise ValueError("Invalid embedding model configuration")
 
+
+
         query_emb = query_emb / np.linalg.norm(query_emb)
         similarities = np.dot(self.embedding_matrix, query_emb)
         top_k_indices = np.argsort(similarities)[::-1][:min(k, len(self.ids))]
         top_k_ids = [self.ids[idx] for idx in top_k_indices]
         return [self.doc_store[id_] for id_ in top_k_ids]
+
+    def iter_documents(self):
+        """Iterate over documents as dicts with keys: 'page_content', 'metadata'."""
+        for id_ in self.ids:
+            doc = self.doc_store.get(id_)
+            if doc is not None:
+                yield doc
+
+    def export_documents(self) -> List[dict]:
+        """Return a list copy of all documents in insertion (ID) order."""
+        return [self.doc_store[id_] for id_ in self.ids if id_ in self.doc_store]

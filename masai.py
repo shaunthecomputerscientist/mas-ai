@@ -19,7 +19,6 @@ warnings.filterwarnings('ignore', category=UserWarning, module='google')
 from typing import Optional
 from src.masai.AgentManager.AgentManager import AgentManager, AgentDetails
 from src.masai.MultiAgents.MultiAgent import MultiAgentSystem, SupervisorConfig
-from src.masai.Memory.InMemoryStore import InMemoryDocStore
 from src.masai.GenerativeModel.baseGenerativeModel.basegenerativeModel import BaseGenerativeModel
 #---------------------------------Tools---------------------------------
 # Define your tools and import as needed
@@ -118,8 +117,7 @@ manager.create_agent(
     tools=tools_for_researcher,
     agent_details=research_agent_details,
     plan=True,
-    long_context_order=100,
-    in_memory_store=InMemoryDocStore(embedding_model="all-MiniLM-L6-v2")  # Optional: requires sentence-transformers
+    long_context_order=100
 )
 
 # Example 2: Personal agent with per-component configuration
@@ -128,7 +126,6 @@ manager.create_agent(
     tools=tools_for_personal,
     agent_details=personal_agent_details,
     plan=False,
-    in_memory_store=InMemoryDocStore(embedding_model="all-MiniLM-L6-v2"),  # Optional: requires sentence-transformers
     config_dict={
         'evaluator_streaming': False,  # Disable streaming for evaluator
         'reflector_streaming': False,  # Disable streaming for reflector

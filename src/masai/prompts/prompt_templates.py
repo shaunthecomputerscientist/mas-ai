@@ -81,22 +81,79 @@ RULES:
 - Do not delegate to agent for revision unless necessary. If you can return the answer yourself from the context like chat history and agent output then do so.
 - Do not use agents for trivial tasks like summary, translation, geenral conversation, etc. If context from chat history and agent output is available, construct answer directly.
 """
-SUMMARY_PROMPT="""YOU Can create informative summaries in sequence of long conversations between human and ai agent. Summarize the conversation in as less words as possible (100-200 words) while also retaining as nuch key information of the conversation as possible.
-   Capture things like, what was being talked about?
-   What is the main topic of the conversation?
-   What is the main idea of the conversation?
-   What is the main conclusion of the conversation?\n
+SUMMARY_PROMPT="""YOU Can create informative summaries to EXTRACT ONLY VERY IMPORTABTAND KEY DETAILS in sequence of long conversations between current  human and current ai agent. 
+Summarize/Compress the conversation in as less words as possible (100-200 words) while also retaining as much key information (names, links, entities, numbers, relationships) as possible that is worth remembering for LONG TERN.
+   Capture things like: what was being talked about? main topic, key ideas, and the conclusion.
    Retain specific keywords, links, names, ideas, etc from the conversation.
    This should be done in passive voice from third person point of view.
-   Conversation:\n
-   {messages}
-   """
+
+STRUCTURED EXTRACTION REQUIREMENTS:
+Extract and format the following information from the conversation:
+
+1. ENTITIES: Who/what is being discussed? (names, products, items)
+   Format: entity1, entity2, entity3
+
+2. RELATIONSHIPS: How are entities connected?
+   Format: entity1 -> relationship -> entity2
+
+3. PREFERENCES: What does the user prefer/dislike?
+   Format: item: [options], confidence: 0.0-1.0
+
+4. FACTS: Key numbers, dates, links, specifications
+   Format: fact_name: value, source: where_from
+
+5. ACTIONS: What was decided/agreed upon?
+   Format: action_name: description, status: pending/completed
+
+6. KEYWORDS: Most important keywords/terms from conversation
+   Format: keyword1, keyword2, keyword3
+
+METADATA EXTRACTION:
+Extract metadata in the following format (one per line, exactly as shown):
+MEMORY_TYPE: [preference|fact|action|recommendation|question|other]
+CONFIDENCE: [0.0-1.0]
+IMPORTANCE: [0.0-1.0]
+
+CATEGORIZATION:
+Choose 3-7 most apt categories from this predefined list:
+- Personal Preferences (food, entertainment, lifestyle)
+- Technical Knowledge (programming, tools, systems)
+- Professional (work, career, projects)
+- Learning (education, skills, courses)
+- Health & Wellness (fitness, nutrition, mental health)
+- Relationships (people, connections, social)
+- Travel & Places (locations, trips, geography)
+- Entertainment (movies, games, books, music)
+- Finance & Business (money, investments, commerce)
+- Problem Solving (issues, solutions, debugging)
+- General Knowledge (facts, information, trivia)
+- Other
+
+CATEGORIES: ["<category1>", "<category2>", "<category3>"]
+
+RESPONSE FORMAT (STRICT):
+[Summary text here - 100-200 words]
+
+ENTITIES: [extracted entities]
+RELATIONSHIPS: [extracted relationships]
+PREFERENCES: [extracted preferences]
+FACTS: [extracted facts]
+ACTIONS: [extracted actions]
+KEYWORDS: [extracted keywords]
+MEMORY_TYPE: [type]
+CONFIDENCE: [score]
+IMPORTANCE: [score]
+CATEGORIES: ["category1", "category2", "category3"]
+
+Conversation:\n
+{messages}
+"""
 TOOL_LOOP_WARNING_PROMPT = """\n\nWARNING: YOU APPEAR TO BE STUCK IN A TOOL USE LOOP. REANALYZE CONVERSATION HISTORY, PREVIOUS TOOL OUTPUTs, GOALs, TASKSs, etc.
 DECIDE IF YOU NEED DIFFERENT TOOL, PASS TO OTHER AGENT, REFLECT or ANSWER DIRECTLY\n\n"""
 EVALUATOR_NODE_PROMPT = (
     "{warning}\n\n"
     "=== CONTEXT ===\n"
-    "USER QUESTION:\n{original_question}\n\n"
+    "USER ORIGINAL QUESTION:\n{original_question}\n\n"
     "<PREVIOUS TOOL INPUT START>\n{tool_input}\n<PREVIOUS TOOL INPUT END>\n"
     "<PREVIOUS TOOL OUTPUT START>\n{tool_output}\n<PREVIOUS TOOL OUTPUT END>\n"
     "{plan_str}\n"
