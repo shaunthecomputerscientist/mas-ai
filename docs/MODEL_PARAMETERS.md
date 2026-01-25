@@ -323,14 +323,32 @@ These parameters are **framework-specific** and are automatically filtered out b
 ### Context Callable Parameters
 
 #### `context_callable`
-- **Type**: `Callable`
-- **Description**: Function that uses user input to provide additional context to LLM
+- **Type**: `Union[Callable, List[Callable]]`
+- **Description**: Function or list of functions that use user input to provide additional context to LLM. Only called for user queries when role='user'. If list, results are combined with newlines.
+- **Example**:
+  ```python
+  # Single callable
+  context_callable=my_callable
+
+  # List of callables
+  context_callable=[callable_1, callable_2, callable_3]
+  ```
 - **Used in**: `AgentManager.create_agent()`
 
 #### `callable_config`
-- **Type**: `Dict[str, Callable]`
-- **Description**: Dictionary mapping node names to context callables
-- **Example**: `{"router": callable_1, "evaluator": callable_2}`
+- **Type**: `Union[Dict[str, Callable], Dict[str, List[Callable]]]`
+- **Description**: Dictionary mapping node names to context callables or lists of callables. Called for node-specific processing. If list, results are combined with newlines.
+- **Example**:
+  ```python
+  # Single callable per node
+  callable_config={"router": callable_1, "evaluator": callable_2}
+
+  # List of callables per node
+  callable_config={
+      "router": [callable_1, callable_2],
+      "evaluator": [callable_3, callable_4]
+  }
+  ```
 - **Used in**: `AgentManager.create_agent()`
 
 ---

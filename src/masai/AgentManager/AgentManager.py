@@ -58,7 +58,7 @@ class AgentManager:
             ValueError: If `model_config_path` is not provided or if `streaming` is
                         True but `streaming_callback` is not provided.
         """
-        self.agents = {}
+        self.agents : Dict[str, Agent] = {}
         self.agent_prompts = {}
         self.logging = logging
         self.context = context
@@ -152,8 +152,8 @@ class AgentManager:
 
     def create_agent(self, agent_name: str, tools: List[object], agent_details: AgentDetails,
                  memory_order: int = 10, long_context: bool = True,long_context_order: int = 20, shared_memory_order: int = 10,
-                 plan: bool = False,temperature=0.2,context_callable:Optional[Callable]=None,retain_messages_order: int = 10,
-                 max_tool_output_words: int = 3000, persist_memory: Optional[bool] = None, callable_config: Optional[Dict[str, Callable]] = None, **kwargs):
+                 plan: bool = False,temperature=0.2,context_callable:Optional[Union[Callable, List[Callable]]]=None,retain_messages_order: int = 10,
+                 max_tool_output_words: int = 3000, persist_memory: Optional[bool] = None, callable_config: Optional[Union[Dict[str, Callable], Dict[str, List[Callable]]]] = None, **kwargs):
         """Create and register a new agent in the AgentManager.
 
         Args:
@@ -165,11 +165,11 @@ class AgentManager:
             long_context_order (int, optional): Number of past interactions summary to keep in long context. Defaults to 10.
             shared_memory_order (int, optional): Shared memory size for components. Defaults to 10.
             plan (bool, optional): Include planner if True. Defaults to False.
-            context_callable (Optional[Callable]): Callable that uses user input to give more context to the llm during inference. OOnly called for user queries when role='user' and not agent-to-agent delegation or internal node to node processing. Defaults to None.
+            context_callable (Optional[Union[Callable, List[Callable]]]): Callable or list of callables that use user input to give more context to the llm during inference. Only called for user queries when role='user' and not agent-to-agent delegation or internal node to node processing. If list, results are combined with newlines. Defaults to None.
             retain_messages_order (int, optional): Number of past interactions to keep in memory for an agent's internal state across multiple queries. Defaults to 10.
             max_tool_output_words (int, optional): Maximum number of words from tool output to include in LLM prompts. Defaults to 3000.
             persist_memory (Optional[bool], optional): Enable persistent memory if True. Defaults to None.
-            callable_config (Optional[Dict[str, Callable]], optional): Dictionary mapping node names to context callables. Defaults to None.
+            callable_config (Optional[Union[Dict[str, Callable], Dict[str, List[Callable]]]], optional): Dictionary mapping node names to context callables or lists of callables. If list, results are combined with newlines. Defaults to None.
             **kwargs: Additional keyword arguments to be passed to the agent.
 
             **kwargs: Additional keyword arguments.  Can include:
@@ -227,7 +227,6 @@ class AgentManager:
 
         # Determine persist_memory: use AgentManager's memory_config if available
         effective_persist_memory = persist_memory if persist_memory is not None else (True if self.memory_config else False)
-
         # Build llm_args with all necessary parameters
         llm_args = {
             "temperature": temperature,
@@ -390,7 +389,17 @@ class AgentManager:
     def list_agents(self) -> List[str]:
         """List all registered agents."""
         return list(self.agents.keys())
+    
+    def update_context(self, new_context: dict, agent_name: Optional[str] = None) -> None:
+        """Update the context with new information."""
+        self.context.update(new_context)
+        if agent_name:
+            self.agents[agent_name.lower()].set_context(new_context, mode='update')
+        else:
+            for agent in self.agents.values():
+                agent.set_context(new_context, mode='update')
 
+        
     def cleanup(self) -> None:
         """
         Cleanup all resources held by AgentManager.
@@ -437,6 +446,8 @@ class AgentManager:
         except Exception as e:
             # Don't fail cleanup, just log if possible
             print(f"Error during AgentManager cleanup: {e}")
+
+    
 
     def __del__(self):
         """Destructor to ensure cleanup when AgentManager is garbage collected."""

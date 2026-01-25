@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "masai_framework"
-version = "0.4.6"  # Vanilla SDK wrappers for OpenAI and Gemini, streamlined dependencies
+version = "0.5.2"  # Vanilla SDK wrappers for OpenAI and Gemini, streamlined dependencies
 authors = [{ name = "PILER", email = "mrpolymathematica@gmail.com" }]
 description = "Multi-Agent System Framework for AI Agents with Vanilla SDK Wrappers and Custom LangGraph"
 readme = "README.md"

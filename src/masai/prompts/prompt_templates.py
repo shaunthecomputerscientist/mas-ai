@@ -85,7 +85,7 @@ SUMMARY_PROMPT="""YOU Can create informative summaries to EXTRACT ONLY VERY IMPO
 Summarize/Compress the conversation in as less words as possible (100-200 words) while also retaining as much key information (names, links, entities, numbers, relationships) as possible that is worth remembering for LONG TERN.
    Capture things like: what was being talked about? main topic, key ideas, and the conclusion.
    Retain specific keywords, links, names, ideas, etc from the conversation.
-   This should be done in passive voice from third person point of view.
+   Try to use graph based approach to retain key information while summarizing with less focus on constructing whole long sentences.
 
 STRUCTURED EXTRACTION REQUIREMENTS:
 Extract and format the following information from the conversation:

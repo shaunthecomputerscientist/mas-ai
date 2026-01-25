@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Dict, List, Literal, Type, Tuple, Callable
+from typing import Dict, List, Literal, Type, Tuple, Callable, Union
 from typing import Optional
 from ..schema import Document
 from datetime import datetime
@@ -147,7 +147,7 @@ class MASGenerativeModel(BaseGenerativeModel):
         chat_log: str = None,
         streaming: bool = False,
         streaming_callback: Optional[Callable] = None,
-        context_callable: Optional[Callable]=None,
+        context_callable: Optional[Union[Callable, list[Callable]]]=None,
         **kwargs
     ):
         """
@@ -165,7 +165,7 @@ class MASGenerativeModel(BaseGenerativeModel):
                 long_context (bool, optional): Flag to enable long context handling, allowing the model to process extended contextual information through summary. Defaults to True.
                 long_context_order (int, optional): The size or order of the long context when enabled. Controls how much historical data is considered. Defaults to 10.
                 chat_log (Optional[str], optional): File path to a chat log for loading past chat data as context. Defaults to None.
-                context_callable (Optional[Callable]): Callable that uses user input to give more context to the llm.
+                context_callable (Optional[Union[Callable, List[Callable]]]): Callable or list of callables that use user input to give more context to the llm. If list, results are combined with newlines.
                 streaming (bool, optional): Enable or disable streaming of responses from
                     the model. Defaults to False.
                 streaming_callback (Optional[Callable], optional): Async callback for streaming chunks. Defaults to None.
@@ -187,7 +187,7 @@ class MASGenerativeModel(BaseGenerativeModel):
                 k (int, optional): Returns top k elements from long-term memory matching the query.
                 Defaults to 5.
                 content_capping_limit (int, optional): Maximum number of characters to include from long-term memory. Defaults to 3000.
-                callable_config (dict, optional): Configuration for the context_callable. Defaults to None.
+                callable_config (Union[Callable, List[Callable], Dict[str, Callable], Dict[str, List[Callable]]], optional): Configuration for the context_callable. Can be a single callable, list of callables, or dict mapping node names to callables/lists. If list, results are combined with newlines. Defaults to None.
         """
         super().__init__(
             model_name=model_name,
@@ -215,9 +215,11 @@ class MASGenerativeModel(BaseGenerativeModel):
             self.llm_long_context = GenerativeModel(model_name=self.model_name,category=self.category,temperature=0.5,memory=False)
             self.context_summaries: List= []
             self._context_lock = asyncio.Lock()
+            self._background_tasks = set()  # Track background summarization tasks
         else:
             self.llm_long_context, self.context_summaries = None, None
             self._context_lock = None
+            self._background_tasks = None
 
 
         self.long_context_order = long_context_order
@@ -316,10 +318,10 @@ class MASGenerativeModel(BaseGenerativeModel):
     async def _update_long_context_background(self, messages: List[Dict[str, str]]):
         """
         Background task to update long context without blocking.
-        Runs in parallel with LLM call.
+        Runs in TRUE PARALLEL with main LLM call using asyncio.create_task().
 
         Args:
-            messages: List of message dictionaries to summarize (all except last)
+            messages: COPY of chat_history to summarize (to avoid race conditions)
 
         Returns:
             None. Updates self.context_summaries and optionally flushes to long-term memory.
@@ -327,16 +329,26 @@ class MASGenerativeModel(BaseGenerativeModel):
         Side Effects:
             - Summarizes messages[:-1] using LLM
             - Parses structured metadata from summary
-            - Appends Document to self.context_summaries
+            - Appends Document to self.context_summaries (protected by _context_lock)
             - Flushes to long-term memory if context_summaries exceeds long_context_order
             - Logs debug/error messages
 
         Raises:
             Logs errors but does not raise exception.
+
+        Note:
+            This method is designed to run in the background without blocking.
+            It receives a COPY of chat_history to prevent race conditions.
         """
         try:
             summary_start = time.time()
+            if self.logger:
+                self.logger.debug(f"[BACKGROUND] Starting summarization for {len(messages)} messages")
+
             # Use async version to avoid blocking the event loop
+            # print("Summarizing chat history")
+            summary=None
+
             summary: str = await self.llm_long_context.generate_response_async(SUMMARY_PROMPT.format(messages=messages[:-1]))
             context_summary_modified=False
             if summary is not None:
@@ -360,7 +372,12 @@ class MASGenerativeModel(BaseGenerativeModel):
                             self.context_summaries = self.context_summaries[-self.long_context_order:]
                         if self.context_summaries is None:
                             self.context_summaries = []
-                    self.chat_history = self.chat_history[-1:]
+                    # print("CHAT HISTORY BEING UPDATED")
+                    for message in messages[:-1]:
+                        if message in self.chat_history:
+                            self.chat_history.remove(message)
+                            # print("MESSAGE REMOVED FROM CHAT HISTORY",message)
+                    # self.chat_history = self.chat_history[-1:]
 
             if self.logger:
                 self.logger.debug(f"Background long-context summary completed in {time.time()-summary_start:.2f}s")
@@ -378,33 +395,89 @@ class MASGenerativeModel(BaseGenerativeModel):
         Args:
             query: The user query string to pass to context_callable
             role: The role of the message sender ('user' or other)
+            node: The current node name (for node-specific callables)
 
         Returns:
             None. Updates self.info in-place.
 
         Behavior:
-            - If role is 'user' and context_callable is set, calls it with query
+            - If node is provided and callable_config is set, calls node-specific callable(s)
+            - If role is 'user' and context_callable is set, calls user-level callable(s)
             - If result is dict, merges it into self.info
-            - If result is non-dict, stores it under 'USEFUL DATA' key
+            - If result is list, formats and stores under 'USEFUL DATA' key
+            - If result is non-dict/non-list, stores it under 'USEFUL DATA' key
             - If role is not 'user', removes 'USEFUL DATA' from self.info
         """
-        if node is not None:
-            if self.callable_config:
-                callable_func = self.callable_config.get(node)
-                if callable_func:
-                    context_result = await callable_func(query) if asyncio.iscoroutinefunction(callable_func) else callable_func(query)
-        
-            elif role.lower()=="user":
-                if self.context_callable:
-                    if not context_result:
-                        context_result = await self.context_callable(query) if asyncio.iscoroutinefunction(self.context_callable) else self.context_callable(query)
-            elif 'USEFUL DATA' in self.info.keys():
-                self.info.pop('USEFUL DATA', None)
+        context_result = None  # ✅ ensure it's always defined
+        result_list = []
 
-            if isinstance(context_result, dict):
-                self.info.update(**context_result)
+        if node is not None:
+            # Case 1: node-specific callable
+            if self.callable_config:
+                # Check if callable_config is a dict (node name -> callable mapping)
+                if isinstance(self.callable_config, dict):
+                    node_callable = self.callable_config.get(node)
+                    if node_callable:
+                        # Check if the node's callable is a list
+                        if isinstance(node_callable, list):
+                            for callable_func in node_callable:
+                                result_list.append(
+                                    await callable_func(query)
+                                    if asyncio.iscoroutinefunction(callable_func)
+                                    else callable_func(query)
+                                )
+                            context_result = "\n".join(str(r) if not isinstance(r, dict) else str(r) for r in result_list)
+                        else:
+                            # Single callable for this node
+                            context_result = (
+                                await node_callable(query)
+                                if asyncio.iscoroutinefunction(node_callable)
+                                else node_callable(query)
+                            )
+                # Check if callable_config is a list (applies to all nodes)
+                elif isinstance(self.callable_config, list):
+                    for callable_func in self.callable_config:
+                        result_list.append(
+                            await callable_func(query)
+                            if asyncio.iscoroutinefunction(callable_func)
+                            else callable_func(query)
+                        )
+                    context_result = "\n".join(str(r) if not isinstance(r, dict) else str(r) for r in result_list)
+                # Single callable (applies to all nodes)
+                else:
+                    context_result = (
+                        await self.callable_config(query)
+                        if asyncio.iscoroutinefunction(self.callable_config)
+                        else self.callable_config(query)
+                    )
+
+        # Case 2: fallback for user-level context
+        if role.lower() == "user" and self.context_callable and context_result is None:
+            if isinstance(self.context_callable, list):
+                for callable_func in self.context_callable:
+                    result_list.append(
+                        await callable_func(query)
+                        if asyncio.iscoroutinefunction(callable_func)
+                        else callable_func(query)
+                    )
+                context_result = "\n".join(str(r) if not isinstance(r, dict) else str(r) for r in result_list)
             else:
-                self.info.update({'USEFUL DATA': context_result})
+                context_result = (
+                    await self.context_callable(query)
+                    if asyncio.iscoroutinefunction(self.context_callable)
+                    else self.context_callable(query)
+                )
+
+        # Case 3: cleanup if not user
+        if role.lower() != "user" and "USEFUL DATA" in self.info:
+            self.info.pop("USEFUL DATA", None)
+
+        # ✅ Always safe to check this now
+        if isinstance(context_result, dict):
+            self.info.update(**context_result)
+        elif context_result is not None:
+            self.info.update({"USEFUL DATA": context_result})
+
             
 
     async def generate_response_mas(
@@ -442,10 +515,20 @@ class MASGenerativeModel(BaseGenerativeModel):
 
         # start=time.time()
 
-        # Handle context extension
+        # Handle context extension - TRUE BACKGROUND EXECUTION
         if self.long_context and len(self.chat_history) > self.memory_order:
-            await self._update_long_context_background(self.chat_history)
-            # await self._update_chat_history()
+            # Create task with COPY to avoid race conditions
+            # This runs in TRUE PARALLEL with the main LLM call below
+            task = asyncio.create_task(
+                self._update_long_context_background(self.chat_history.copy())
+            )
+            # Track task to prevent garbage collection
+            self._background_tasks.add(task)
+            # Remove from set when done (cleanup)
+            task.add_done_callback(self._background_tasks.discard)
+
+            if self.logger:
+                self.logger.debug(f"[MAIN] Summarization task created, continuing with main LLM call")
         elif len(self.chat_history)> self.memory_order:
             await self._update_chat_history()
 
@@ -468,7 +551,7 @@ class MASGenerativeModel(BaseGenerativeModel):
         }
 
         try:
-            print("\n\n\n\n",self.prompt.format(**mas_inputs),"\n\n")
+            # print("\n\n\n\n",self.prompt.format(**mas_inputs),"\n\n")
             # print("END FORMAT TIME", time.time()-start_formating_time)
             # Use the prompt template with MAS-specific inputs
             if self.logger:
@@ -577,7 +660,10 @@ class MASGenerativeModel(BaseGenerativeModel):
             user_question = kwargs['query']
 
         # Load from context_summaries (extract page_content strings)
-        docs = [context.page_content for context in self.context_summaries if len(self.context_summaries) > 0]
+        if self.context_summaries is not None:
+            docs = [context.page_content for context in self.context_summaries if len(self.context_summaries) > 0]
+        else:
+            docs = []
         # print("CONTEXT SUMMARIES",docs)
         # print("long term memory obj",self.long_term_memory, self.persist_memory)
         # print(f"DEBUG: context_summaries_count={len(self.context_summaries)}, long_context_order={self.long_context_order}, memory_order={self.memory_order}, chat_history_len={len(self.chat_history)}")
@@ -859,10 +945,20 @@ class MASGenerativeModel(BaseGenerativeModel):
             - Calls streaming_callback with each chunk if configured
             - Updates chat_history with user and assistant messages
         """
-        # Handle context extension
+        # Handle context extension - TRUE BACKGROUND EXECUTION
         if self.long_context and len(self.chat_history) > self.memory_order:
-            await self._update_long_context_background(self.chat_history)
-            # await self._update_chat_history()
+            # Create task with COPY to avoid race conditions
+            # This runs in TRUE PARALLEL with the main LLM streaming call below
+            task = asyncio.create_task(
+                self._update_long_context_background(self.chat_history.copy())
+            )
+            # Track task to prevent garbage collection
+            self._background_tasks.add(task)
+            # Remove from set when done (cleanup)
+            task.add_done_callback(self._background_tasks.discard)
+
+            if self.logger:
+                self.logger.debug(f"[STREAM] Summarization task created, continuing with streaming")
         elif len(self.chat_history)> self.memory_order:
             await self._update_chat_history()
 
@@ -885,6 +981,7 @@ class MASGenerativeModel(BaseGenerativeModel):
         }
 
         try:
+            # print(self.prompt.format(**mas_inputs))
             # Create structured output model for streaming
             # Use json_mode for OpenAI and Gemini for better reliability
             structured_llm= self._return_structured_model(prompt=prompt,output_structure=output_structure)
