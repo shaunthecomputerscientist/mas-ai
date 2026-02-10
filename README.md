@@ -277,10 +277,45 @@ async for state in agent.initiate_agent_astream(
 
 MASAI supports two vector database backends for persistent memory: **Redis** and **Qdrant**.
 
-#### Option 1: Redis Backend
+#### Choose Your Backend
+
+| Feature | Redis | Qdrant |
+|---------|-------|--------|
+| **Setup** | Simple (local or cloud) | More complex (server required) |
+| **Scalability** | Single-node focused | Distributed, cloud-native |
+| **Performance** | Fast for small/medium datasets | Optimized for large-scale retrieval |
+| **Use Case** | Development, small deployments | Production, multi-user systems |
+| **Cloud** | Redis Cloud | Qdrant Cloud |
+
+#### Step 1: Start Your Backend
+
+**Redis (local)**:
+```bash
+redis-server
+# Or with Docker:
+docker run -d -p 6379:6379 redis:latest
+```
+
+**Qdrant (local)**:
+```bash
+# Download and run (Linux/Mac):
+./qdrant --storage-path ./qdrant-storage
+
+# Or with Docker:
+docker run -d -p 6333:6333 qdrant/qdrant:latest
+```
+
+**Qdrant Cloud**:
+- Create account at https://cloud.qdrant.io
+- Create cluster
+- Copy cluster URL and API key
+
+#### Step 2: Configure Backend
+
+**Option A: Redis Backend**
 
 ```python
-from masai.AgentManager import AgentManager, AgentDetails
+from masai.AgentManager import AgentManager
 from masai.Memory.LongTermMemory import RedisConfig
 from langchain_openai import OpenAIEmbeddings
 
@@ -291,10 +326,12 @@ redis_config = RedisConfig(
     vector_size=1536,  # Must match embedding model output
     embedding_model=OpenAIEmbeddings(model="text-embedding-3-small"),
     dedup_mode="similarity",  # Options: "none", "similarity", "hash"
-    dedup_similarity_threshold=0.95
+    dedup_similarity_threshold=0.95,
+    connection_pool_size=10,  # Connection pooling (fixed in latest version)
+    use_async=True  # Recommended for production
 )
 
-# Create manager with memory config
+# Create manager with memory backend
 manager = AgentManager(
     user_id="user_123",
     model_config_path="model_config.json",
@@ -302,90 +339,276 @@ manager = AgentManager(
 )
 ```
 
-#### Option 2: Qdrant Backend
+**Option B: Qdrant Backend (Local)**
 
 ```python
+from masai.AgentManager import AgentManager
+from masai.Memory.LongTermMemory import QdrantConfig
+from langchain_openai import OpenAIEmbeddings
+
+# Verify Qdrant is running at http://localhost:6333
+qdrant_config = QdrantConfig(
+    url="http://localhost:6333",  # Qdrant server URL
+    collection_name="masai_memories",
+    vector_size=1536,  # MUST match embedding model output (1536 for text-embedding-3-small)
+    embedding_model=OpenAIEmbeddings(model="text-embedding-3-small"),
+    distance="cosine",  # Options: "cosine" (recommended), "dot", "euclid"
+    dedup_mode="similarity",  # Deduplication: "none", "similarity", "hash"
+    dedup_similarity_threshold=0.9  # 0-1: similarity threshold for deduplication
+)
+
+manager = AgentManager(
+    user_id="user_123",
+    model_config_path="model_config.json",
+    memory_config=qdrant_config
+)
+```
+
+**Option C: Qdrant Cloud**
+
+```python
+from masai.AgentManager import AgentManager
+from masai.Memory.LongTermMemory import QdrantConfig
+from langchain_openai import OpenAIEmbeddings
+
+qdrant_cloud_config = QdrantConfig(
+    url="https://your-cluster-name.qdrant.io",  # From Qdrant Cloud console
+    api_key="your-qdrant-api-key",              # From Qdrant Cloud console
+    collection_name="masai_memories",
+    vector_size=1536,
+    embedding_model=OpenAIEmbeddings(model="text-embedding-3-small"),
+    distance="cosine"
+)
+
+manager = AgentManager(
+    user_id="user_123",
+    model_config_path="model_config.json",
+    memory_config=qdrant_cloud_config
+)
+```
+
+#### Step 3: Create Agent with Persistent Memory
+
+```python
+from masai.AgentManager import AgentDetails
+
+# Create agent with persistent memory
+agent = manager.create_agent(
+    agent_name="assistant",
+    agent_details=AgentDetails(
+        capabilities=["reasoning", "learning"],
+        description="Assistant with persistent memory"
+    ),
+    persist_memory=True,           # Enable persistence (requires memory_config in AgentManager)
+    long_context=True,             # Enable long-context summarization
+    long_context_order=5           # Flush to storage when summaries reach this count
+)
+```
+
+#### Step 4: Use Memory Operations
+
+**Manual Save** (on-demand):
+```python
+from masai.schema import Document
+
+# Save memories
+await manager.long_term_memory.save(
+    user_id="user_123",
+    documents=[
+        Document(
+            page_content="User prefers detailed technical explanations",
+            metadata={"category": "preferences", "weight": 0.8}
+        ),
+        "User is a software engineer with 10 years experience",  # String format
+        {  # Dict format
+            "page_content": "Interested in AI, ML, Python",
+            "metadata": {"category": "interests"}
+        }
+    ]
+)
+```
+
+**Search Memories** (semantic search):
+```python
+# Retrieve similar memories
+memories = await manager.long_term_memory.search(
+    user_id="user_123",
+    query="What technical topics does the user care about?",
+    k=5,  # Top 5 results
+    categories=["interests"]  # Optional: filter by category
+)
+
+for doc in memories:
+    print(f"Memory: {doc.page_content}")
+    print(f"Metadata: {doc.metadata}")
+```
+
+**During Agent Execution** (automatic):
+```python
+# Automatic memory management happens during agent execution
+result = await agent.initiate_agent(
+    query="Help me learn about vector databases",
+    passed_from="user"
+)
+
+# If long_context_order is exceeded, summaries automatically flush to persistent storage
+```
+
+**Access from Agent Components**:
+```python
+# Via agent's LLM components
+await agent.llm_router.long_term_memory.save(user_id="user_123", documents=[...])
+await agent.llm_evaluator.long_term_memory.search(user_id="user_123", query="...", k=5)
+
+# Or via manager (recommended - canonical reference)
+await manager.long_term_memory.save(user_id="user_123", documents=[...])
+await manager.long_term_memory.search(user_id="user_123", query="...", k=5)
+```
+
+#### Vector Size Reference
+
+The `vector_size` parameter **MUST match** your embedding model output:
+
+| Embedding Model | Vector Size | Notes |
+|-----------------|------------|-------|
+| text-embedding-3-small | 1536 | Recommended for most use cases |
+| text-embedding-3-large | 3072 | High-dimensional, slower |
+| text-embedding-ada-002 | 1536 | Legacy, use 3-small instead |
+| Custom embedding function | Varies | Check function output dimension |
+
+**If mismatch**: You'll get errors like "Vector dimension mismatch" during save/search.
+
+#### Deduplication Modes
+
+Prevents storing duplicate or nearly-duplicate memories:
+
+| Mode | Behavior | Use Case |
+|------|----------|----------|
+| `"none"` | Store all documents | Maximum memory coverage |
+| `"hash"` | Block exact duplicates | Fast, strict dedup |
+| `"similarity"` | Block similar documents (threshold-based) | Recommended - removes near-duplicates |
+
+Set `dedup_similarity_threshold` (0.0-1.0) when using similarity mode:
+- 0.95: Very similar documents blocked (strict)
+- 0.80: Somewhat similar documents blocked (moderate)
+- 0.50: Loosely similar documents blocked (lenient)
+
+#### Complete End-to-End Example
+
+```python
+import asyncio
 from masai.AgentManager import AgentManager, AgentDetails
 from masai.Memory.LongTermMemory import QdrantConfig
 from langchain_openai import OpenAIEmbeddings
 
-# Configure Qdrant backend (local)
-qdrant_config = QdrantConfig(
-    url="http://localhost:6333",  # Qdrant server URL
-    collection_name="masai_memories",
-    vector_size=1536,  # Must match embedding model output
-    embedding_model=OpenAIEmbeddings(model="text-embedding-3-small"),
-    distance="cosine",  # Options: "cosine", "dot", "euclid"
-    dedup_mode="similarity",  # Options: "none", "similarity", "hash"
-    dedup_similarity_threshold=0.9
-)
+async def main():
+    # Step 1: Configure Qdrant backend
+    qdrant_config = QdrantConfig(
+        url="http://localhost:6333",
+        collection_name="learning_agent",
+        vector_size=1536,
+        embedding_model=OpenAIEmbeddings(model="text-embedding-3-small"),
+        distance="cosine",
+        dedup_mode="similarity",
+        dedup_similarity_threshold=0.9
+    )
 
-# For Qdrant Cloud
-qdrant_cloud_config = QdrantConfig(
-    url="https://your-cluster.qdrant.io",
-    api_key="your-qdrant-api-key",
-    collection_name="masai_memories",
-    vector_size=1536,
-    embedding_model=OpenAIEmbeddings(model="text-embedding-3-small")
-)
+    # Step 2: Create AgentManager with memory
+    manager = AgentManager(
+        user_id="student_001",
+        model_config_path="model_config.json",
+        memory_config=qdrant_config
+    )
 
-# Create manager with memory config
-manager = AgentManager(
-    user_id="user_123",
-    model_config_path="model_config.json",
-    memory_config=qdrant_config  # or qdrant_cloud_config
-)
-```
+    # Step 3: Create agent with persistent memory
+    agent = manager.create_agent(
+        agent_name="tutor",
+        agent_details=AgentDetails(
+            capabilities=["teaching", "learning", "explanation"],
+            description="AI tutor that learns student preferences"
+        ),
+        persist_memory=True,
+        long_context=True,
+        long_context_order=10
+    )
 
-#### Create Agent with Persistent Memory
+    # Step 4: Save initial knowledge about student
+    from masai.schema import Document
+    await manager.long_term_memory.save(
+        user_id="student_001",
+        documents=[
+            Document(
+                page_content="Student prefers examples over theory",
+                metadata={"category": "preferences", "updated": "2026-02-10"}
+            ),
+            Document(
+                page_content="Student is learning Python and data science",
+                metadata={"category": "current_learning"}
+            )
+        ]
+    )
 
-```python
-# Create agent with persistent memory enabled
-agent = manager.create_agent(
-    agent_name="assistant",
-    agent_details=AgentDetails(
-        capabilities=["reasoning"],
-        description="Assistant"
-    ),
-    persist_memory=True,  # Enable persistence (requires memory_config in AgentManager)
-    long_context=True,
-    long_context_order=5  # Flush to persistent storage when summaries exceed this
-)
-```
+    # Step 5: Run agent (memory auto-manages itself)
+    for i in range(3):
+        result = await agent.initiate_agent(
+            query=f"Teach me about {['lists', 'dictionaries', 'functions'][i]} in Python",
+            passed_from="user"
+        )
+        print(f"Lesson {i+1}: {result.get('answer', 'No answer')[:200]}...")
 
-### Memory Operations
+    # Step 6: Search accumulated memories
+    student_prefs = await manager.long_term_memory.search(
+        user_id="student_001",
+        query="What does the student prefer?",
+        k=5
+    )
+    
+    print("\nLearned preferences:")
+    for doc in student_prefs:
+        print(f"- {doc.page_content}")
 
-```python
-from masai.schema import Document
-
-# Save memories manually (in addition to automatic overflow)
-await agent.llm_router.long_term_memory.save(
-    user_id="user_123",
-    documents=[
-        Document(page_content="User prefers dark mode"),
-        "Plain string also works",
-        {"page_content": "Dict format supported", "metadata": {"category": "preferences"}}
-    ]
-)
-
-# Search memories with semantic similarity
-memories = await agent.llm_router.long_term_memory.search(
-    user_id="user_123",
-    query="What are user preferences?",
-    k=5,
-    categories=["preferences"]  # Optional category filter
-)
-
-# Access via AgentManager (recommended - canonical reference)
-await manager.long_term_memory.save(user_id="user_123", documents=[...])
-await manager.long_term_memory.search(user_id="user_123", query="...", k=5)
+# Run example
+asyncio.run(main())
 ```
 
 ### Memory Flow
 
 Memory flows through two paths:
-1. **Automatic**: When `context_summaries` exceeds `long_context_order`, overflow is flushed to persistent storage
-2. **Manual**: Direct calls to `long_term_memory.save()` for on-demand persistence
+
+1. **Automatic**: 
+   - When `context_summaries` exceeds `long_context_order`, overflow is flushed to persistent storage
+   - Happens transparently during agent execution
+   - Set `long_context_order=10` to flush after 10 summary items
+
+2. **Manual**: 
+   - Direct calls to `long_term_memory.save()` for on-demand persistence
+   - Use for bulk ingestion or pre-loading knowledge
+   - Enables fine-grained control
+
+### Troubleshooting Long-Term Memory
+
+**Qdrant Connection Refused**:
+```bash
+# Check if Qdrant is running
+curl http://localhost:6333/health
+
+# If not, start Qdrant:
+docker run -d -p 6333:6333 qdrant/qdrant:latest
+```
+
+**Vector Dimension Mismatch**:
+```
+Error: Vector dimension 1536 does not match collection dimension 3072
+```
+→ Check `vector_size` matches your embedding model output
+
+**Collection Not Found**:
+→ Collection is auto-created on first write. Ensure Qdrant is running.
+
+**Memory Not Persisting**:
+- Ensure `persist_memory=True` when creating agent
+- Ensure `memory_config` is set in AgentManager
+- Check `long_context_order` is not too high
 
 **See [docs/MEMORY_SYSTEM.md](docs/MEMORY_SYSTEM.md) for detailed memory docs.**
 
