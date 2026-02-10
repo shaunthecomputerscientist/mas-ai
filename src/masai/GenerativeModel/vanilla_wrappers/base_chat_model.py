@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from typing import Any, AsyncGenerator, Dict, List, Optional, Type, Union
 from pydantic import BaseModel
 import json
-from ..parameter_config import MASAI_SPECIFIC_PARAMS
+from ..parameter_config import MASAI_SPECIFIC_PARAMS, MAPPED_PARAMS, GEMINI_SPECIFIC_PARAMS, OPENAI_SPECIFIC_PARAMS
 
 
 class AIMessage:
@@ -57,11 +57,27 @@ class BaseChatModel(ABC):
         self.temperature = temperature
         self.api_key = api_key
         self.verbose = verbose
-        # Filter out MASAI-specific parameters before storing in extra_kwargs
-        # These should NOT be passed to model APIs
+        
+        # Build set of parameters that should NOT be passed to model APIs
+        params_to_filter = set(MASAI_SPECIFIC_PARAMS)
+        # Add all mapped parameter names (standardized names like stop_sequences, max_output_tokens)
+        params_to_filter.update(MAPPED_PARAMS.keys())
+        # Add all provider-specific parameter names (mapped versions like stop, max_tokens, max_completion_tokens, etc.)
+        for param_mapping in MAPPED_PARAMS.values():
+            params_to_filter.update(param_mapping.values())
+        # Add all provider-specific parameters (they'll be extracted separately)
+        params_to_filter.update(GEMINI_SPECIFIC_PARAMS)
+        params_to_filter.update(OPENAI_SPECIFIC_PARAMS)
+        # Add provider-prefixed variations (e.g., gemini_*, openai_*)
+        for key in list(kwargs.keys()):
+            if key.startswith('gemini_') or key.startswith('openai_'):
+                params_to_filter.add(key)
+        
+        # Filter out MASAI-specific and mapped parameters before storing in extra_kwargs
+        # These should NOT be passed directly to model APIs
         self.extra_kwargs = {
             k: v for k, v in kwargs.items()
-            if k not in MASAI_SPECIFIC_PARAMS
+            if k not in params_to_filter
         }
         
         # Structured output configuration

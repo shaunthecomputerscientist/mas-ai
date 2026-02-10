@@ -230,7 +230,19 @@ def extract_gemini_params(kwargs: Dict[str, Any], verbose: bool = False) -> Dict
             if verbose:
                 logger.debug(f"✅ Gemini: Added specific '{key}' = {kwargs[key]}")
 
+    # 3b️⃣ CONSTRAINT: Drop logprobs if response_logprobs is explicitly False
+    # This prevents Gemini API errors: "logprobs only allowed when response_logprobs enabled"
+    if params.get("response_logprobs") is False and "logprobs" in params:
+        del params["logprobs"]
+        if verbose:
+            logger.debug(f"⚠️ Gemini: Dropped 'logprobs' because response_logprobs=False")
+
     # 4️⃣ Pass through unknown (future) parameters safely
+    # Build a set of all param names that should NOT be passed through
+    #   - Mapped param standardized names (e.g., 'max_output_tokens', 'enable_logprobs')
+    #   - Gemini-specific names from mapped params (e.g., 'stopSequences', 'responseLogprobs', 'logprobs')
+    mapped_provider_names = set(m['gemini'] for m in MAPPED_PARAMS.values())
+    
     for key, value in kwargs.items():
         # Skip comment fields and MASAI-specific params
         if any(key.startswith(prefix) for prefix in COMMENT_PREFIXES):
@@ -238,10 +250,13 @@ def extract_gemini_params(kwargs: Dict[str, Any], verbose: bool = False) -> Dict
 
         if (
             key not in params
+            and key not in MAPPED_PARAMS  # Don't re-pass standardized names
+            and key not in mapped_provider_names  # Don't re-pass Gemini-mapped names
             and key not in OPENAI_SPECIFIC_PARAMS
             and key not in MASAI_SPECIFIC_PARAMS
             and not key.startswith("openai_")
-        ):  
+            and not key.startswith("gemini_")
+        ):
             params[key] = value
             if verbose:
                 logger.debug(f"🪶 Gemini: Passed through custom param '{key}'")
@@ -295,7 +310,19 @@ def extract_openai_params(kwargs: Dict[str, Any], verbose: bool = False) -> Dict
             if verbose:
                 logger.debug(f"✅ OpenAI: Added specific '{key}' = {kwargs[key]}")
 
+    # 3b️⃣ CONSTRAINT: Drop top_logprobs if logprobs is explicitly False
+    # This prevents OpenAI 400 errors: "top_logprobs only allowed when logprobs enabled"
+    if params.get("logprobs") is False and "top_logprobs" in params:
+        del params["top_logprobs"]
+        if verbose:
+            logger.debug(f"⚠️ OpenAI: Dropped 'top_logprobs' because logprobs=False")
+
     # 4️⃣ Pass through unknown (future) parameters safely
+    # Build a set of all param names that should NOT be passed through
+    #   - Mapped param standardized names (e.g., 'max_output_tokens', 'enable_logprobs')
+    #   - OpenAI-specific names from mapped params (e.g., 'max_tokens', 'logprobs', 'top_logprobs', 'stop')
+    mapped_provider_names = set(m['openai'] for m in MAPPED_PARAMS.values())
+    
     for key, value in kwargs.items():
         # Skip comment fields and MASAI-specific params
         if any(key.startswith(prefix) for prefix in COMMENT_PREFIXES):
@@ -303,9 +330,12 @@ def extract_openai_params(kwargs: Dict[str, Any], verbose: bool = False) -> Dict
 
         if (
             key not in params
+            and key not in MAPPED_PARAMS  # Don't re-pass standardized names
+            and key not in mapped_provider_names  # Don't re-pass OpenAI-mapped names
             and key not in GEMINI_SPECIFIC_PARAMS
             and key not in MASAI_SPECIFIC_PARAMS
             and not key.startswith("gemini_")
+            and not key.startswith("openai_")
         ):
             params[key] = value
             if verbose:

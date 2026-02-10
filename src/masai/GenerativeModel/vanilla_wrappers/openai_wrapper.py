@@ -163,6 +163,7 @@ class ChatOpenAI(BaseChatModel):
         logprobs: Optional[bool] = None,
         top_logprobs: Optional[int] = None,
         stop: Optional[Union[str, List[str]]] = None,
+        stop_sequences: Optional[Union[str, List[str]]] = None,  # Alias for stop (backward compatibility)
 
         verbose: bool = False,
         **kwargs
@@ -172,6 +173,11 @@ class ChatOpenAI(BaseChatModel):
 
         See class docstring for comprehensive parameter documentation.
         """
+        # Handle stop_sequences as alias for stop (backward compatibility)
+        # If both are provided, stop takes precedence
+        if stop_sequences is not None and stop is None:
+            stop = stop_sequences
+
         super().__init__(
             model=model,
             temperature=temperature,
@@ -197,6 +203,13 @@ class ChatOpenAI(BaseChatModel):
 
         # Check if this is a reasoning model
         self._is_reasoning_model = self._check_reasoning_model()
+        
+        # Remove conflicting max_tokens/max_completion_tokens from extra_kwargs
+        # Only one should be set based on model type (done in _prepare_request_params)
+        if "max_tokens" in self.extra_kwargs:
+            del self.extra_kwargs["max_tokens"]
+        if "max_completion_tokens" in self.extra_kwargs:
+            del self.extra_kwargs["max_completion_tokens"]
 
         if self.verbose:
             print(f"✅ Initialized {self.__class__.__name__}(model='{self.model}', reasoning={self._is_reasoning_model})")
@@ -293,11 +306,23 @@ class ChatOpenAI(BaseChatModel):
         if self.seed is not None:
             params["seed"] = self.seed
 
+        # LOGPROBS: Only include top_logprobs if logprobs is enabled.
+        # If the user requested `num_logprobs` (mapped to top_logprobs) but
+        # did not explicitly enable `logprobs`, enable it automatically
+        # so the provider accepts the top_logprobs parameter.
         if self.logprobs is not None:
             params["logprobs"] = self.logprobs
 
         if self.top_logprobs is not None:
-            params["top_logprobs"] = self.top_logprobs
+            # Respect explicit disabling: if logprobs is False, do NOT forward top_logprobs
+            if params.get("logprobs") is False:
+                # User explicitly disabled logprobs; ignore top_logprobs to avoid API errors
+                pass
+            else:
+                # If logprobs wasn't explicitly set, enable it when top_logprobs is requested
+                if params.get("logprobs") is None:
+                    params["logprobs"] = True
+                params["top_logprobs"] = self.top_logprobs
 
         if self.stop is not None:
             params["stop"] = self.stop
@@ -320,8 +345,23 @@ class ChatOpenAI(BaseChatModel):
                 # Function calling mode (alternative)
                 params["response_format"] = {"type": "json_object"}
         
-        # Add any extra kwargs
-        params.update(self.extra_kwargs)
+        # Add any extra kwargs. Defensive: handle provider-mapped params
+        # that may have slipped into `extra_kwargs` (e.g., 'top_logprobs').
+        safe_extra = dict(self.extra_kwargs)
+
+        # If 'top_logprobs' is present in extra kwargs but logprobs isn't enabled,
+        # enable it so the provider accepts the parameter.
+        if "top_logprobs" in safe_extra:
+            # If logprobs explicitly disabled, drop top_logprobs to avoid API errors
+            if params.get("logprobs") is False:
+                safe_extra.pop("top_logprobs", None)
+            else:
+                if params.get("logprobs") is None:
+                    params["logprobs"] = True
+                # Move it into params explicitly to ensure it's applied correctly
+                params["top_logprobs"] = safe_extra.pop("top_logprobs")
+
+        params.update(safe_extra)
         
         return params
     

@@ -8,24 +8,24 @@ def answermodel(tool_names: List[str], tools) -> Type[BaseModel]:
 
             reasoning: str = Field(..., description="LOGICAL REASONING AND CONTEXT AANLYSIS THAT JUSTIFIES YOUR ANSWER.")
             answer: Optional[str] = Field(None, description="GENERATE FINAL ANSWER IN THIS FIELD.")
-            satisfied: bool = Field(..., description="SET TO: True to return final answer and (tool,tool_input=None). SET TO: False for further work on task (reflection, tool usage, etc).")
+            satisfied: bool = Field(..., description="SET TO: True to return final answer and (tool=None,tool_input=None). SET TO: False for further work on task (reflection, tool usage, etc).")
             tool: Optional[str] = Field(
                 None,
                 description=f"""SELECT TOOLS FROM: {[(tool.name, tool.args_schema.model_json_schema()['description']) for tool in tools]}.
-                            \n\nTo use tool, set satisfied=False and specify the tool name, tool_input.
-                            TO RETURN answer field, set satisfied=True and tool,tool_input=None.
-                            ON RETURNING answer, YOUR RESPONSE GOES TO USER."""
+                            \n\nTo use a tool -> set satisfied=False and specify the `tool` name, `tool_input`.
+                            TO RETURN `answer` field -> set satisfied=True and `tool`=None,`tool_input`=None.
+                            ON RETURNING `answer`, YOUR RESPONSE GOES TO USER."""
             )
             tool_input: Optional[str] = Field(
                 None,
                 description=f"""ALWAYS PROVIDE TOOL INPUT AS VALID JSON string. TOOL INPUT SCHEMA: {[(tool.name, tool.args_schema.model_json_schema()['properties']) for tool in tools]}.
-                            \n\nSET TO: None if no tool is needed.
-                            If optional parameters are NOT NEEDED in tool input, for a task, refrain from using them in tool input."""
+                            \n\nSET `tool_input`: None, if no tool is needed.
+                            If optional parameters are NOT NEEDED in tool_input for a task, refrain from using them in tool_input."""
             )
 
             delegate_to_agent: Optional[str] = Field(
                 None,
-                description="If task delegation is needed, specify one target agent's name. SET: satisfied=True and tool and tool_input to None when delegating. Defaults to None."
+                description="If task delegation is needed, specify target agent's name (if available). SET: satisfied=True and tool, tool_input to None when delegating. Defaults to None."
             )
 
             @staticmethod

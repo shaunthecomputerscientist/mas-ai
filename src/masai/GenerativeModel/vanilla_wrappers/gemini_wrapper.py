@@ -192,6 +192,12 @@ class ChatGoogleGenerativeAI(BaseChatModel):
             if k not in MASAI_SPECIFIC_PARAMS
         }
         self.model_kwargs = {**(model_kwargs or {}), **filtered_kwargs}
+        
+        # Remove conflicting Gemini-specific parameters from model_kwargs
+        # Only the standardized versions should be used
+        conflicting_params = ['maxOutputTokens', 'stopSequences', 'response_logprobs', 'logprobs']
+        for param in conflicting_params:
+            self.model_kwargs.pop(param, None)
 
         # Initialize Google Generative AI client (new google-genai SDK)
         self.client = genai.Client(api_key=self.api_key)

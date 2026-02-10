@@ -47,7 +47,7 @@
 
             "// Core parameters": "",
             "// Note: temperature is ignored for reasoning models (gpt-5, o1, o3)": "",
-            "max_output_tokens": 2048,
+            "max_tokens": 2048,
 
             "// Reasoning parameters (GPT-5, o1, o3, o4 only)": "",
             "// Options: 'low', 'medium', 'high'": "",
@@ -83,9 +83,9 @@
 
     "research_agent":{
         "router": {
-            "model_name": "gemini-1.5-flash",
+            "model_name": "gemini-2.5-flash",
             "category": "gemini",
-            "description": "Gemini 1.5 Flash for research routing",
+            "description": "Gemini 2.5 Flash for research routing",
 
             "temperature": 0.7,
             "max_output_tokens": 2048,
@@ -100,9 +100,9 @@
             ]
         },
         "evaluator": {
-            "model_name": "gemini-1.5-pro",
+            "model_name": "gemini-2.5-pro",
             "category": "gemini",
-            "description": "Gemini 1.5 Pro for research evaluation",
+            "description": "Gemini 2.5 Pro for research evaluation",
 
             "temperature": 0.5,
             "max_output_tokens": 2048,
@@ -116,9 +116,9 @@
             ]
         },
         "reflector": {
-            "model_name": "gemini-1.5-pro",
+            "model_name": "gemini-2.5-pro",
             "category": "gemini",
-            "description": "Gemini 1.5 Pro for research reflection",
+            "description": "Gemini 2.5 Pro for research reflection",
 
             "temperature": 0.3,
             "max_output_tokens": 3072,
@@ -132,9 +132,9 @@
             ]
         },
         "planner": {
-            "model_name": "gemini-1.5-flash",
+            "model_name": "gemini-2.5-flash",
             "category": "gemini",
-            "description": "Gemini 1.5 Flash for research planning",
+            "description": "Gemini 2.5 Flash for research planning",
 
             "temperature": 0.5,
             "max_output_tokens": 1024,

@@ -61,13 +61,14 @@ manager = AgentManager(
     logging=True,
     model_config_path=model_config_path,
     chat_log='MAS/WORKSPACE/chat_log.json',  # ensure it exists
-    streaming=True,  # Set to True to enable streaming
-    streaming_callback=async_streaming_callback,  # Required if streaming=True
+    # streaming=True,  # Set to True to enable streaming
+    # streaming_callback=async_streaming_callback,  # Required if streaming=True
 )
 
 # Define tools
 tools_for_researcher = []
 tools_for_personal = []
+
 tools_for_productivity = []
 
 # Define agent details for each agent

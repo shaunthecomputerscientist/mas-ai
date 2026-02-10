@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 from dataclasses import dataclass
+from weakref import WeakValueDictionary
+import asyncio
 import uuid
 import hashlib
 
@@ -18,11 +20,15 @@ try:
     # Redis imports; runtime optional
     from redis import Redis
     from redis.asyncio import Redis as AsyncRedis
+    from redis.asyncio import ConnectionPool as AsyncConnectionPool
+    from redis.connection import ConnectionPool as SyncConnectionPool
     from langchain_redis import RedisVectorStore
     _REDIS_AVAILABLE = True
 except Exception:
     Redis = None  # type: ignore
     AsyncRedis = None  # type: ignore
+    AsyncConnectionPool = None  # type: ignore
+    SyncConnectionPool = None  # type: ignore
     RedisVectorStore = None  # type: ignore
     _REDIS_AVAILABLE = False
 
@@ -471,7 +477,7 @@ class RedisAdapter:
     """
 
     def __init__(self, cfg: RedisConfig):
-        """Initialize RedisAdapter with configuration.
+        """Initialize RedisAdapter with connection pooling.
 
         Args:
             cfg: RedisConfig instance with Redis connection details
@@ -480,8 +486,8 @@ class RedisAdapter:
             ImportError: If redis or langchain-redis is not installed
 
         Side Effects:
-            - Creates Redis connection
-            - Stores config for later use
+            - Creates connection pool with max_connections
+            - Stores client for reuse across operations
         """
         if not _REDIS_AVAILABLE:
             raise ImportError(
@@ -492,30 +498,47 @@ class RedisAdapter:
         self.redis_url = cfg.redis_url
         self.index_name = cfg.index_name
 
-    def _get_redis_client(self):
-        """Get Redis client (sync or async based on config).
-
-        Returns:
-            Redis or AsyncRedis client instance
-        """
-        if self.cfg.use_async:
-            return AsyncRedis.from_url(
+        # Create connection pool once at init (FIXED: was creating new client each time)
+        if cfg.use_async:
+            pool = AsyncConnectionPool.from_url(
                 self.redis_url,
-                socket_timeout=self.cfg.socket_timeout,
-                socket_connect_timeout=self.cfg.socket_connect_timeout,
-                socket_keepalive=self.cfg.socket_keepalive,
-                retry_on_timeout=self.cfg.retry_on_timeout,
-                health_check_interval=self.cfg.health_check_interval,
+                max_connections=cfg.connection_pool_size,
+                socket_timeout=cfg.socket_timeout,
+                socket_connect_timeout=cfg.socket_connect_timeout,
+                socket_keepalive=cfg.socket_keepalive,
+                retry_on_timeout=cfg.retry_on_timeout,
+                health_check_interval=cfg.health_check_interval,
+                decode_responses=False,
             )
+            self._redis_client = AsyncRedis(connection_pool=pool)
         else:
-            return Redis.from_url(
+            pool = SyncConnectionPool.from_url(
                 self.redis_url,
-                socket_timeout=self.cfg.socket_timeout,
-                socket_connect_timeout=self.cfg.socket_connect_timeout,
-                socket_keepalive=self.cfg.socket_keepalive,
-                retry_on_timeout=self.cfg.retry_on_timeout,
-                health_check_interval=self.cfg.health_check_interval,
+                max_connections=cfg.connection_pool_size,
+                socket_timeout=cfg.socket_timeout,
+                socket_connect_timeout=cfg.socket_connect_timeout,
+                socket_keepalive=cfg.socket_keepalive,
+                retry_on_timeout=cfg.retry_on_timeout,
+                health_check_interval=cfg.health_check_interval,
+                decode_responses=False,
             )
+            self._redis_client = Redis(connection_pool=pool)
+
+    @property
+    def redis_client(self):
+        """Return cached Redis client with connection pool."""
+        return self._redis_client
+
+    async def close(self) -> None:
+        """Close Redis connection pool gracefully."""
+        try:
+            if hasattr(self, '_redis_client') and self._redis_client:
+                if self.cfg.use_async:
+                    await self._redis_client.close()
+                else:
+                    self._redis_client.close()
+        except Exception:
+            pass  # Silently ignore cleanup errors
 
     def _get_doc_id_with_dedup(
         self,
@@ -793,13 +816,10 @@ class RedisAdapter:
             None. Clears all documents asynchronously from Redis.
         """
         try:
-            client = self._get_redis_client()
             if self.cfg.use_async:
-                await client.flushdb()
-                await client.close()
+                await self.redis_client.flushdb()
             else:
-                client.flushdb()
-                client.close()
+                self.redis_client.flushdb()
         except Exception:
             pass
 
@@ -810,11 +830,10 @@ class RedisAdapter:
             None. Closes connection asynchronously.
         """
         try:
-            client = self._get_redis_client()
             if self.cfg.use_async:
-                await client.close()
+                await self.redis_client.close()
             else:
-                client.close()
+                self.redis_client.close()
         except Exception:
             pass
 
@@ -884,6 +903,10 @@ class LongTermMemory:
         else:
             raise ValueError(f"Unknown backend type: {self.backend_type}")
 
+        # Initialize per-user locks for synchronized access (prevents race conditions)
+        self._user_locks: Dict[Union[str, int], asyncio.Lock] = WeakValueDictionary()
+        self._lock_manager_lock = asyncio.Lock()
+
     def _resolve_embed_fn(self) -> Callable[[List[str]], Union[List[List[float]], Any]]:
         """Resolve embedding function from backend config.embedding_model.
 
@@ -924,6 +947,33 @@ class LongTermMemory:
             f"or custom class with embed_documents(texts: List[str]) -> List[List[float]]"
         )
 
+    async def _get_user_lock(self, user_id: Union[str, int]) -> asyncio.Lock:
+        """Get or create a lock for a specific user (double-checked locking pattern).
+
+        Uses WeakValueDictionary to automatically clean up locks when no longer referenced.
+        Double-checked locking minimizes lock contention for different users.
+
+        Args:
+            user_id: User identifier
+
+        Returns:
+            asyncio.Lock for this user
+        """
+        # Fast path: lock already exists
+        if user_id in self._user_locks:
+            return self._user_locks[user_id]
+
+        # Slow path: create lock under manager lock protection
+        async with self._lock_manager_lock:
+            # Double-check: another task may have created it while we waited
+            if user_id in self._user_locks:
+                return self._user_locks[user_id]
+
+            # Create new lock for this user
+            lock = asyncio.Lock()
+            self._user_locks[user_id] = lock
+            return lock
+
     async def save(self, user_id: Union[str, int], documents: Sequence[Union[Document, str, Dict[str, Any]]]) -> None:
         """Save documents to backend (Qdrant or Redis) with automatic embedding.
 
@@ -944,8 +994,11 @@ class LongTermMemory:
             - Applies deduplication based on dedup_mode
             - Upserts to backend with user_id isolation
         """
-        embedder = self._resolve_embed_fn()
-        await self.adapter.upsert_documents(user_id=user_id, documents=documents, embed_fn=embedder, categories_resolver=self.categories_resolver)
+        # Acquire per-user lock to prevent concurrent modification races
+        lock = await self._get_user_lock(user_id)
+        async with lock:
+            embedder = self._resolve_embed_fn()
+            await self.adapter.upsert_documents(user_id=user_id, documents=documents, embed_fn=embedder, categories_resolver=self.categories_resolver)
 
     async def search(
         self,
@@ -965,6 +1018,9 @@ class LongTermMemory:
         Returns:
             List of similar documents
         """
-        embedder = self._resolve_embed_fn()
-        return await self.adapter.search(user_id=user_id, query=query, k=k, categories=categories, embed_fn=embedder)
+        # Acquire per-user lock to prevent concurrent modification races
+        lock = await self._get_user_lock(user_id)
+        async with lock:
+            embedder = self._resolve_embed_fn()
+            return await self.adapter.search(user_id=user_id, query=query, k=k, categories=categories, embed_fn=embedder)
 
