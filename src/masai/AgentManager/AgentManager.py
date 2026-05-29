@@ -410,7 +410,54 @@ class AgentManager:
             for agent in self.agents.values():
                 agent.set_context(new_context, mode='update')
 
-        
+    def remove_agent(self, agent_name: str) -> None:
+        """
+        Safely remove a specific agent and free its resources.
+        Prevents memory leaks by explicitly clearing chat histories and tool mappings
+        before dropping the reference, ensuring deep garbage collection.
+        """
+        agent_key = agent_name.lower()
+        if agent_key not in self.agents:
+            return
+
+        agent = self.agents[agent_key]
+        try:
+            # Clear agent's retained state
+            if hasattr(agent, 'retained_state'):
+                agent.retained_state = None
+
+            # Clear LLM chat histories to break large memory references
+            for llm_attr in ['llm_router', 'llm_evaluator', 'llm_reflector', 'llm_planner']:
+                if hasattr(agent, llm_attr):
+                    llm = getattr(agent, llm_attr)
+                    if llm:
+                        if hasattr(llm, 'chat_history'):
+                            llm.chat_history.clear()
+                        
+                        # Clear deep states specific to MASGenerativeModel
+                        if hasattr(llm, 'context_summaries') and llm.context_summaries is not None:
+                            llm.context_summaries.clear()
+                            
+                        if hasattr(llm, 'llm_long_context') and llm.llm_long_context is not None:
+                            if hasattr(llm.llm_long_context, 'chat_history'):
+                                llm.llm_long_context.chat_history.clear()
+                                
+                        if hasattr(llm, '_background_tasks') and llm._background_tasks is not None:
+                            for task in list(llm._background_tasks):
+                                if not task.done():
+                                    task.cancel()
+                            llm._background_tasks.clear()
+
+            # Clear tool mapping
+            if hasattr(agent, 'tool_mapping'):
+                agent.tool_mapping.clear()
+        except Exception as e:
+            print(f"Error during manual removal of agent {agent_key}: {e}")
+        finally:
+            # Drop from registry
+            del self.agents[agent_key]
+            if agent_key in self.agent_prompts:
+                del self.agent_prompts[agent_key]
     def cleanup(self) -> None:
         """
         Cleanup all resources held by AgentManager.
@@ -426,21 +473,26 @@ class AgentManager:
                     agent.retained_state = None
 
                 # Clear LLM chat histories
-                if hasattr(agent, 'llm_router') and agent.llm_router:
-                    if hasattr(agent.llm_router, 'chat_history'):
-                        agent.llm_router.chat_history.clear()
-
-                if hasattr(agent, 'llm_evaluator') and agent.llm_evaluator:
-                    if hasattr(agent.llm_evaluator, 'chat_history'):
-                        agent.llm_evaluator.chat_history.clear()
-
-                if hasattr(agent, 'llm_reflector') and agent.llm_reflector:
-                    if hasattr(agent.llm_reflector, 'chat_history'):
-                        agent.llm_reflector.chat_history.clear()
-
-                if hasattr(agent, 'llm_planner') and agent.llm_planner:
-                    if hasattr(agent.llm_planner, 'chat_history'):
-                        agent.llm_planner.chat_history.clear()
+                for llm_attr in ['llm_router', 'llm_evaluator', 'llm_reflector', 'llm_planner']:
+                    if hasattr(agent, llm_attr):
+                        llm = getattr(agent, llm_attr)
+                        if llm:
+                            if hasattr(llm, 'chat_history'):
+                                llm.chat_history.clear()
+                            
+                            # Clear deep states specific to MASGenerativeModel
+                            if hasattr(llm, 'context_summaries') and llm.context_summaries is not None:
+                                llm.context_summaries.clear()
+                                
+                            if hasattr(llm, 'llm_long_context') and llm.llm_long_context is not None:
+                                if hasattr(llm.llm_long_context, 'chat_history'):
+                                    llm.llm_long_context.chat_history.clear()
+                                    
+                            if hasattr(llm, '_background_tasks') and llm._background_tasks is not None:
+                                for task in list(llm._background_tasks):
+                                    if not task.done():
+                                        task.cancel()
+                                llm._background_tasks.clear()
 
                 # Clear tool mapping
                 if hasattr(agent, 'tool_mapping'):
