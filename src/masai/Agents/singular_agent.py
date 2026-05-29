@@ -47,6 +47,8 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
         self.pydanticmodel = AnswerFormat # Set pydanticmodel for BaseAgent's use
         self.agent_context = agent_context # Set agent_context for BaseAgent's use
         self.MAX_TOOL_LOOP = kwargs.get('max_tool_loop', config.max_tool_loops)
+        self.MAX_REFLECTION_COUNT = kwargs.get("max_reflection_count",config.MAX_REFLECTION_COUNT)
+        self.MAX_RECURSION_LIMIT = kwargs.get("max_recursion_limit", config.MAX_RECURSION_LIMIT)
 
         # Compile the workflow using async nodes
         self.app: CompiledStateGraph = self.agentworkflow()
@@ -67,7 +69,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
                         # Ensure info exists before updating
                         if component.info is None: component.info = {}
                         component.info.update(context)
-
+    
     # Override node_handler from BaseAgent -> Make it async
     async def node_handler(self, state: State, llm: BaseGenerativeModel, prompt: str, component_context: Optional[List] = None, node: Optional[str] = None) -> State:
         """Handle node-specific LLM responses and update state asynchronously."""
@@ -151,7 +153,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
         satisfied = state.get("satisfied", False)
         current_tool = state.get("current_tool", None)
         reflection_counter = state.get('reflection_counter', 0)
-        MAX_REFLECTIONS = config.MAX_REFLECTION_COUNT # Define max reflections
+        MAX_REFLECTIONS = self.MAX_REFLECTION_COUNT
 
         # NEW: Save state snapshot for continuity (before routing decision)
         # This captures the current conversation state including messages, answer, etc.
@@ -528,7 +530,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
                 current_question=new_query  # Track current question
             )
 
-        configuration = {"recursion_limit": config.MAX_RECURSION_LIMIT}
+        configuration = {"recursion_limit": self.MAX_RECURSION_LIMIT}
 
         try:
             # Execute fully and return the final state
@@ -601,7 +603,7 @@ class Agent(BaseAgent): # Inherit from the modified BaseAgent
                 current_question=new_query  # Track current question
             )
 
-        configuration = {"recursion_limit": config.MAX_RECURSION_LIMIT}
+        configuration = {"recursion_limit": self.MAX_RECURSION_LIMIT}
 
         try:
             # Stream state updates

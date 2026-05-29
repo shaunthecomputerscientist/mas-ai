@@ -7,6 +7,7 @@ from ..pydanticModels.AnswerModel import answermodel
 from dataclasses import dataclass
 from ..prompts.prompt_templates import get_agent_prompts
 from ..Memory.LongTermMemory import QdrantConfig, RedisConfig, LongTermMemory
+from ..Tools.ToolRegistry import ToolRegistry
 @dataclass
 class AgentDetails:
     capabilities: List[str]  # e.g., ["reasoning", "coding", "science"]
@@ -153,7 +154,7 @@ class AgentManager:
     def create_agent(self, agent_name: str, tools: List[object], agent_details: AgentDetails,
                  memory_order: int = 10, long_context: bool = True,long_context_order: int = 20, shared_memory_order: int = 10,
                  plan: bool = False,temperature=0.2,context_callable:Optional[Union[Callable, List[Callable]]]=None,retain_messages_order: int = 10,
-                 max_tool_output_words: int = 3000, persist_memory: Optional[bool] = None, callable_config: Optional[Union[Dict[str, Callable], Dict[str, List[Callable]]]] = None, **kwargs):
+                 max_tool_output_words: int = 3000, persist_memory: Optional[bool] = None, callable_config: Optional[Union[Dict[str, Callable], Dict[str, List[Callable]]]] = None, tool_registry: Optional[ToolRegistry] = None, **kwargs):
         """Create and register a new agent in the AgentManager.
 
         Args:
@@ -170,9 +171,13 @@ class AgentManager:
             max_tool_output_words (int, optional): Maximum number of words from tool output to include in LLM prompts. Defaults to 3000.
             persist_memory (Optional[bool], optional): Enable persistent memory if True. Defaults to None.
             callable_config (Optional[Union[Dict[str, Callable], Dict[str, List[Callable]]]], optional): Dictionary mapping node names to context callables or lists of callables. If list, results are combined with newlines. Defaults to None.
+            tool_registry (ToolRegistry, optional): Registry holding dynamic tools. If provided, adds discovery capabilities. Defaults to None.
             **kwargs: Additional keyword arguments to be passed to the agent.
 
             **kwargs: Additional keyword arguments.  Can include:
+                - `max_tool_loop` (int, optional): Maximum number of tool loops.
+                - `max_reflection_count` (int, optional): Maximum reflection count.
+                - `max_recursion_limit` (int, optional): Maximum recursion limit.
                 - `config_dict` (dict, optional): A dictionary specifying memory order overrides for individual LLMs.
                   The dictionary should have the following structure:
                   ```
@@ -206,6 +211,12 @@ class AgentManager:
         prompts = self.load_prompts()
         system_prompt = self._create_system_prompt(agent_name, agent_details)
         chat_prompts = self.promptformatter(*prompts, system_prompt=system_prompt)
+
+        # Clone tools list so we don't mutate the user's list
+        tools = list(tools)
+        if tool_registry:
+            tools.append(tool_registry.get_discovery_tool())
+            kwargs['tool_registry'] = tool_registry
 
         # Configure tools and answer format
         tool_mapping = {tool.name: tool for tool in tools}

@@ -26,6 +26,7 @@ src/masai/MultiAgents/__init__.py
 src/masai/OMAN/__init__.py
 src/masai/OMAN/oman.py
 src/masai/Tools/Tool.py
+src/masai/Tools/ToolRegistry.py
 src/masai/Tools/__init__.py
 src/masai/Tools/PARSERs/json_parser.py
 src/masai/Tools/logging_setup/logger.py

@@ -61,6 +61,7 @@ class BaseAgent:
         self.pydanticmodel: Optional[Type[BaseModel]] = None
         self.agent_context: Optional[Dict[str, Any]] = None
         self.character_factor = kwargs.get('character_factor', 10)
+        self.tool_registry = kwargs.get('tool_registry', None)
 
         # NEW: Retained state for continuity across workflow executions
         self.retained_state: Optional[Dict[str, Any]] = None
@@ -115,8 +116,11 @@ class BaseAgent:
         """Parse and sanitize tool input based on the tool's schema."""
         # Ensure tool_mapping and tool exist before accessing args_schema
         if tool_name not in self.tool_mapping:
-             if self.logger: self.logger.error(f"Tool '{tool_name}' not found in tool_mapping during gettoolinput.")
-             return {"error": f"Tool '{tool_name}' not found."} # Return error dict
+             if hasattr(self, 'tool_registry') and self.tool_registry and self.tool_registry.has_tool(tool_name):
+                 self.tool_mapping[tool_name] = self.tool_registry.get_tool(tool_name)
+             else:
+                 if self.logger: self.logger.error(f"Tool '{tool_name}' not found in tool_mapping during gettoolinput.")
+                 return {"error": f"Tool '{tool_name}' not found."} # Return error dict
 
         tool = self.tool_mapping[tool_name]
         if not hasattr(tool, 'args_schema') or not tool.args_schema:
@@ -313,18 +317,20 @@ class BaseAgent:
 
 
         if tool_name not in self.tool_mapping:
-            # ... (no changes needed in this block) ...
-            if self.logger: self.logger.error(f"Tool '{tool_name}' not found in tool_mapping.")
-            state['tool_output'] = f"Error: Tool '{tool_name}' not found."
-            state['satisfied'] = False
-            state['current_tool'] = None  # Clear invalid tool to prevent infinite loop
-            if "messages" not in state: state["messages"] = []
-            state["messages"].append({"role": "tool", "name": tool_name, "content": state['tool_output']})
+            if hasattr(self, 'tool_registry') and self.tool_registry and self.tool_registry.has_tool(tool_name):
+                self.tool_mapping[tool_name] = self.tool_registry.get_tool(tool_name)
+            else:
+                if self.logger: self.logger.error(f"Tool '{tool_name}' not found in tool_mapping.")
+                state['tool_output'] = f"Error: Tool '{tool_name}' not found."
+                state['satisfied'] = False
+                state['current_tool'] = None  # Clear invalid tool to prevent infinite loop
+                if "messages" not in state: state["messages"] = []
+                state["messages"].append({"role": "tool", "name": tool_name, "content": state['tool_output']})
 
-            # Manual state update for early return
-            state['previous_node'] = 'execute_tool'
-            state['current_node'] = None
-            return state
+                # Manual state update for early return
+                state['previous_node'] = 'execute_tool'
+                state['current_node'] = None
+                return state
 
 
         tool = self.tool_mapping[tool_name]

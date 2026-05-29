@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: masai_framework
-Version: 0.5.3
+Version: 0.5.4
 Summary: Multi-Agent System Framework for AI Agents with Vanilla SDK Wrappers and Custom LangGraph
 Author-email: PILER <mrpolymathematica@gmail.com>
 Requires-Python: >=3.9
@@ -152,6 +152,12 @@ async for state in agent.initiate_agent_astream(
 - **Tool Integration**: Seamless integration with LangChain tools
 - **Streaming Support**: Real-time response streaming
 
+### 🔧 Dynamic Tool Discovery
+- **ToolRegistry**: Register hundreds of tools without bloating the LLM prompt
+- **`discover_tools` Meta-Tool**: LLM discovers tools on-demand via keyword search
+- **Lazy Execution**: Discovered tools are fetched from the registry and cached at runtime
+- **Formatted Schemas**: Tool names, descriptions, and JSON input schemas returned in the exact `AnswerModel` format
+
 ### 💾 Persistent Memory
 - **Redis Backend**: Fast vector storage with RediSearch
 - **Qdrant Backend**: Distributed vector database support
@@ -210,7 +216,8 @@ AgentManager (Orchestrator)
        ↓
 Agent (Router-Evaluator-Reflector)
        ├─ MASGenerativeModel (LLM + Memory)
-       ├─ Tool Executor
+       ├─ Tool Executor (static tools + ToolRegistry fallback)
+       ├─ ToolRegistry (dynamic tool discovery)
        └─ State Manager
        ↓
 Memory System
@@ -984,6 +991,12 @@ When creating agents with `manager.create_agent()`, you can configure these para
 | `context_callable` | Callable or List[Callable] | None | User-level context function(s) - called for all user queries |
 | `callable_config` | Dict | None | Node-specific context mapping (router, evaluator, reflector) |
 
+#### Dynamic Tool Discovery
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `tool_registry` | ToolRegistry | None | Registry for dynamic tool discovery. When set, a `discover_tools` meta-tool is auto-injected. |
+
 #### Execution Parameters
 
 | Parameter | Type | Default | Description |
@@ -1047,7 +1060,10 @@ agent = manager.create_agent(
     
     # Execution
     max_tool_output_words=5000,
-    retain_messages_order=15
+    retain_messages_order=15,
+    
+    # Dynamic Tool Discovery (optional)
+    # tool_registry=my_registry  # See ToolRegistry section below
 )
 
 # Use the agent
@@ -1127,7 +1143,66 @@ agent = manager.create_agent(
 )
 ```
 
-### Pattern 5: Agent with Multiple Context Providers
+### Pattern 5: Agent with Dynamic Tool Discovery (ToolRegistry)
+
+When you have many tools (tens or hundreds) and don't want to bloat the LLM prompt with all of them, use the `ToolRegistry`. The agent starts with only a `discover_tools` meta-tool. When the agent needs a tool, it searches the registry by keyword, discovers the tool's schema, and executes it dynamically.
+
+```python
+from masai.Tools.Tool import tool
+from masai.Tools.ToolRegistry import ToolRegistry
+
+# Define tools with the MASAI @tool decorator
+@tool("get_weather")
+def get_weather(location: str) -> str:
+    """Returns the current weather for a given location."""
+    return f"The weather in {location} is 72°F and sunny."
+
+@tool("analyze_portfolio")
+def analyze_portfolio(holdings: dict, risk_level: str) -> str:
+    """Analyzes a stock portfolio given holdings and risk tolerance."""
+    return f"Portfolio analyzed with {risk_level} risk."
+
+@tool("schedule_meeting")
+def schedule_meeting(participants: list, duration_minutes: int) -> str:
+    """Schedules a meeting for the given participants."""
+    return f"Meeting scheduled for {len(participants)} people."
+
+# Create registry and register all tools
+registry = ToolRegistry(tools=[get_weather, analyze_portfolio, schedule_meeting])
+
+# Create agent with NO static tools — only the registry
+agent = manager.create_agent(
+    agent_name="dynamic_agent",
+    agent_details=AgentDetails(
+        capabilities=["dynamic tool discovery"],
+        description="Agent that discovers and uses tools on-demand"
+    ),
+    tools=[],              # Start with zero static tools
+    tool_registry=registry # discover_tools meta-tool auto-injected
+)
+
+# The agent will:
+# 1. Receive a query like "What's the weather in London?"
+# 2. Call discover_tools(query="weather") to search the registry
+# 3. Receive the schema: get_weather(location: str)
+# 4. Call get_weather(location="London") dynamically
+```
+
+You can also **mix static and dynamic tools** — give the agent a few frequently-used tools directly, and put the rest in the registry:
+
+```python
+agent = manager.create_agent(
+    agent_name="hybrid_agent",
+    tools=[get_weather],         # Always available
+    tool_registry=registry,      # analyze_portfolio, schedule_meeting discoverable
+    agent_details=AgentDetails(
+        capabilities=["tool execution"],
+        description="Agent with both static and discoverable tools"
+    )
+)
+```
+
+### Pattern 6: Agent with Multiple Context Providers
 
 ```python
 def get_database_context(query: str) -> str:
@@ -1152,7 +1227,7 @@ agent = manager.create_agent(
 )
 ```
 
-### Pattern 6: Agent with Full Configuration
+### Pattern 7: Agent with Full Configuration
 
 ```python
 def user_context(query: str) -> str:
@@ -1250,14 +1325,16 @@ agent = manager.create_agent(
 
 ## Advanced Agent Creation
 
-### Custom Tool Integration
+### Custom Tool Integration (MASAI Native)
+
+MASAI provides its own `@tool` decorator — no LangChain dependency required:
 
 ```python
-from langchain.tools import tool
+from masai.Tools.Tool import tool
 
-@tool
+@tool("calculate")
 def calculate(expression: str) -> str:
-    """Calculate mathematical expressions"""
+    """Calculate mathematical expressions."""
     return str(eval(expression))
 
 agent = manager.create_agent(
@@ -1266,19 +1343,21 @@ agent = manager.create_agent(
 )
 ```
 
+> **Note**: LangChain tools (`from langchain.tools import tool`) are also fully supported. Both decorators produce compatible `Tool` objects.
+
 ### Custom Tool Integration with Context
 
 ```python
-from langchain.tools import tool
+from masai.Tools.Tool import tool
 
-@tool
+@tool("search_knowledge_base")
 def search_knowledge_base(query: str) -> str:
-    """Search the knowledge base for relevant articles"""
+    """Search the knowledge base for relevant articles."""
     return f"Found 5 articles about {query}"
 
 def kb_context(query: str) -> str:
     """Provide KB search context"""
-    return search_knowledge_base(query)
+    return search_knowledge_base.invoke({"query": query})
 
 agent = manager.create_agent(
     agent_name="kb_agent",
@@ -1290,6 +1369,41 @@ agent = manager.create_agent(
     context_callable=kb_context
 )
 ```
+
+### ToolRegistry API Reference
+
+The `ToolRegistry` class provides dynamic tool management:
+
+```python
+from masai.Tools.ToolRegistry import ToolRegistry
+from masai.Tools.Tool import tool
+
+# Initialize with tools
+registry = ToolRegistry(tools=[tool_a, tool_b, tool_c])
+
+# Register additional tools later
+registry.register_tool(tool_d)
+registry.register_tools([tool_e, tool_f])
+
+# Check tool existence
+registry.has_tool("get_weather")  # True/False
+
+# Fetch a specific tool by name
+tool_obj = registry.get_tool("get_weather")  # Returns Tool or None
+
+# Search tools by keyword (returns top_k matches)
+results = registry.search_tools("weather forecast", top_k=5)
+
+# Get the discover_tools meta-tool (auto-injected by create_agent)
+meta_tool = registry.get_discovery_tool()  # Cached after first call
+```
+
+**How discovery works under the hood:**
+1. `create_agent(tool_registry=registry)` auto-injects a `discover_tools` tool into the agent's static tools
+2. The LLM calls `discover_tools(query="weather")` when it needs a tool
+3. The registry searches by keyword and returns matching tool schemas
+4. The LLM calls the discovered tool (e.g., `get_weather(location="London")`)
+5. `base_agent.py` intercepts the call, fetches the tool from the registry, caches it, and executes it
 
 ### Streaming with Dynamic Context
 
@@ -1378,6 +1492,8 @@ result = await mas_hierarchical.initiate_hierarchical_mas(query="Complex task")
 - **MASGenerativeModel**: LLM with memory management
 - **LongTermMemory**: Persistent memory interface
 - **RedisConfig/QdrantConfig**: Backend configuration
+- **ToolRegistry**: Dynamic tool registration, discovery, and lazy execution
+- **Tool**: MASAI-native tool class with auto-generated Pydantic schemas
 
 **See [docs/API_REFERENCE.md](docs/API_REFERENCE.md) for complete API.**
 
@@ -1432,5 +1548,5 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-**Last Updated**: October 31, 2025
+**Last Updated**: May 29, 2026
 

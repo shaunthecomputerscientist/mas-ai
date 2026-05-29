@@ -31,6 +31,14 @@ load_dotenv()
 import asyncio
 import time
 
+from src.masai.Tools.ToolRegistry import ToolRegistry
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from custom_tools.tools import analyze_stock_portfolio, schedule_complex_meeting, generate_marketing_copy, calculate_rocket_trajectory
+
+registry = ToolRegistry(tools=[analyze_stock_portfolio, schedule_complex_meeting, generate_marketing_copy])
+
 
 # User provides path to their model config
 model_config_path = os.path.join(os.getcwd(), 'model_config.json')
@@ -67,7 +75,7 @@ manager = AgentManager(
 
 # Define tools
 tools_for_researcher = []
-tools_for_personal = []
+tools_for_personal = [calculate_rocket_trajectory]
 
 tools_for_productivity = []
 
@@ -132,7 +140,8 @@ manager.create_agent(
         'reflector_streaming': False,  # Disable streaming for reflector
         'router_temperature': 0.3,     # Custom temperature for router
         'evaluator_temperature': 0.1,  # Custom temperature for evaluator
-    }
+    },
+    tool_registry=registry
 )
 
 # Example 3: Productivity agent with planning
