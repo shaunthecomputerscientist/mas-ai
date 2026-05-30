@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "masai_framework"
-version = "0.5.6"  # Bug fixes: parameter extraction, Redis pooling, async locks; Gemini 2.5 support
+version = "0.5.7"  # Bug fixes: parameter extraction, Redis pooling, async locks; Gemini 2.5 support
 authors = [{ name = "PILER", email = "mrpolymathematica@gmail.com" }]
 description = "Multi-Agent System Framework for AI Agents with Vanilla SDK Wrappers and Custom LangGraph"
 readme = "README.md"

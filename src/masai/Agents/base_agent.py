@@ -223,6 +223,13 @@ class BaseAgent:
                  # Update plan dictionary - overwrite or append? Overwriting based on index.
                  current_state['plan'] = {i: plan for i, plan in enumerate(plans)} # Store plan steps
                  if self.logger: self.logger.info(f"Plan updated: {current_state['plan']}")
+
+                 original_reasoning = parsed_response.get('reasoning', '') # 
+                 if original_reasoning:
+                    parsed_response['reasoning'] = f"{original_reasoning}\n\n {parsed_response['answer']}"
+                 else:
+                    parsed_response['reasoning'] = "\n".join(plans)
+
              except Exception as e:
                  if self.logger: self.logger.error(f"Failed to parse plan string: {parsed_response['answer']}. Error: {e}")
                  # Decide how to handle plan parsing failure

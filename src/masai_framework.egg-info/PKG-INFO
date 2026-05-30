@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: masai_framework
-Version: 0.5.6
+Version: 0.5.7
 Summary: Multi-Agent System Framework for AI Agents with Vanilla SDK Wrappers and Custom LangGraph
 Author-email: PILER <mrpolymathematica@gmail.com>
 Requires-Python: >=3.9
